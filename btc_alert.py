@@ -24,7 +24,7 @@ def send_telegram_alert(message, chat_id=None):
     default_chat_id = os.environ['CHAT_ID']
     final_chat_id = chat_id if chat_id else default_chat_id
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": final_chat_id, "text": message}
+    payload = {"chat_id": final_chat_id, "text": message, "parse_mode": "Markdown"}
     requests.post(url, data=payload)
 
 
@@ -69,9 +69,8 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # 2h % change
+        # 2h & 24h % change
         change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
-        # 24h % change
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
 
         # MA50 and trend
@@ -79,41 +78,56 @@ for symbol, name in COINS.items():
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
-        # MACD call
+        # MACD
         macd_url = f"https://api.twelvedata.com/macd?symbol={symbol}&interval=1h&apikey={API_KEY}"
         macd_resp = requests.get(macd_url).json()
-
         if "values" not in macd_resp:
             raise Exception(f"MACD API error: {macd_resp}")
-
         macd_val = float(macd_resp['values'][0]['macd'])
         signal_val = float(macd_resp['values'][0]['signal'])
 
-        # Advies logica
-        if last_rsi < 30 and macd_val > signal_val:
-            advies = "STRONG BUY ✅"
-            trigger = True
-        elif last_rsi > 70 and macd_val < signal_val:
-            advies = "STRONG SELL ❌"
-            trigger = True
-        else:
-            advies = "WAIT ⚪"
-            trigger = False
+        # Bollinger Bands
+        bb_url = f"https://api.twelvedata.com/bbands?symbol={symbol}&interval=1h&time_period=20&apikey={API_KEY}"
+        bb_resp = requests.get(bb_url).json()
+        if "values" not in bb_resp:
+            raise Exception(f"BBANDS API error: {bb_resp}")
+        lower_band = float(bb_resp['values'][0]['lower_band'])
+        upper_band = float(bb_resp['values'][0]['upper_band'])
+        current_price = df["close"].iloc[-1]
 
-        if not trigger:
-            continue  # Skip alert als niet sterk genoeg
+        # Indicator triggers
+        rsi_trigger = last_rsi < 30 or last_rsi > 70
+        macd_trigger = macd_val > signal_val or macd_val < signal_val
+        bb_trigger = current_price < lower_band or current_price > upper_band
 
-        emoji = "📉" if last_rsi < 30 else "📈"
+        if not (rsi_trigger or macd_trigger or bb_trigger):
+            continue
+
+        # Labels
+        rsi_sentiment = "Bullish 🟢" if last_rsi < 30 else "Bearish 🔴" if last_rsi > 70 else "Neutral ⚪"
+        macd_sentiment = "Bullish 🟢" if macd_val > signal_val else "Bearish 🔴"
+        bb_sentiment = "Bullish 🟢" if current_price < lower_band else "Bearish 🔴" if current_price > upper_band else "Neutral ⚪"
+
+        rsi_label = f"{last_rsi:.2f} → _{rsi_sentiment}_"
+        macd_label = f"{macd_val:.4f} vs {signal_val:.4f} → _{macd_sentiment}_"
+        bb_label = f"{current_price:.2f} {'< lower' if current_price < lower_band else '> upper' if current_price > upper_band else 'inside bands'} → _{bb_sentiment}_"
+
+        advice = "*STRONG BUY ✅*" if (last_rsi < 30 or macd_val > signal_val or current_price < lower_band) else \
+                 "*STRONG SELL ❌*" if (last_rsi > 70 or macd_val < signal_val or current_price > upper_band) else "*WAIT ⚪*"
+
+        # Message
         msg = (
-            f"[{name}] RSI = {last_rsi:.2f} {emoji}\n"
-            f"MACD = {macd_val:.4f}, Signal = {signal_val:.4f}\n"
-            f"Advice: {advies}\n"
-            f"Change (2h): {change_pct_2h:.2f}%\n"
-            f"Change (24h): {change_pct_24h:.2f}%\n"
-            f"Trend: {trend} (MA{MA_PERIOD})"
+            f"*{name}*\n"
+            f"*RSI:* {rsi_label}\n"
+            f"*MACD:* {macd_label}\n"
+            f"*BBANDS:* {bb_label}\n"
+            f"*Advice:* {advice}\n"
+            f"*Change (2h):* {change_pct_2h:.2f}%\n"
+            f"*Change (24h):* {change_pct_24h:.2f}%\n"
+            f"*Trend:* {trend} (MA{MA_PERIOD})"
         )
 
-        # Create chart
+        # Chart
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
         ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
         ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
