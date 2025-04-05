@@ -1,3 +1,5 @@
+# btc_alert.py
+
 import requests
 import pandas as pd
 import os
@@ -16,13 +18,12 @@ RSI_PERIOD = 14
 MA_PERIOD = 50
 
 # ✅ TELEGRAM
-
 def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
     default_chat_id = os.environ['CHAT_ID']
     final_chat_id = chat_id if chat_id else default_chat_id
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": final_chat_id, "text": message, "parse_mode": "Markdown"}
+    payload = {"chat_id": final_chat_id, "text": message}
     requests.post(url, data=payload)
 
 def send_telegram_chart(image_path, chat_id=None):
@@ -44,7 +45,7 @@ for symbol, name in COINS.items():
         data = r.json()
 
         if "values" not in data:
-            msg = f"[ERROR] Geen geldige data voor {name}: {data.get('message', 'Unknown error')}"
+            msg = f"[ERROR] Geen data voor {name}: {data.get('message', 'Onbekende fout')}"
             send_telegram_alert(msg)
             extra = os.environ.get('EXTRA_CHAT_ID')
             if extra:
@@ -75,27 +76,20 @@ for symbol, name in COINS.items():
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-        trend = "↑ UP" if in_uptrend else "↓ DOWN"
-
-        # Status + emoji
-        if last_rsi < 30:
-            status = "*STRONG BUY ✅*"
-            sentiment = "Oversold 🟢"
-        elif last_rsi > 70:
-            status = "*STRONG SELL ❌*"
-            sentiment = "Overbought 🔴"
-        else:
-            status = "*WAIT ⚪*"
-            sentiment = "Neutral ⚪"
 
         # Bericht opstellen
+        emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
+        status = (
+            "OVERSOLD" if last_rsi < 30 else
+            "OVERBOUGHT" if last_rsi > 70 else
+            "NEUTRAAL (test alert)"
+        )
+        trend = "↑ UP" if in_uptrend else "↓ DOWN"
+
         msg = (
-    f"*{name}*
-"
-            f"*RSI:* {last_rsi:.2f} → _{sentiment}_\n"
-            f"*Advice:* {status}\n"
-            f"*Change (2h):* {change_pct:.2f}%\n"
-            f"*Trend:* {trend} (MA{MA_PERIOD})"
+            f"[{name}] RSI = {last_rsi:.2f} — {status} {emoji}\n"
+            f"Change (2h): {change_pct:.2f}%\n"
+            f"Trend: {trend} (MA{MA_PERIOD})"
         )
 
         # Grafiek maken
@@ -132,5 +126,3 @@ for symbol, name in COINS.items():
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
-
-
