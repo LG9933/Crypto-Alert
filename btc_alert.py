@@ -78,21 +78,18 @@ for symbol, name in COINS.items():
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
-        # MACD with corrected fallback logic
+        # MACD with strict parsing
         macd_url = f"https://api.twelvedata.com/macd?symbol={symbol}&interval=1h&apikey={API_KEY}"
         macd_resp = requests.get(macd_url).json()
         if "values" not in macd_resp or len(macd_resp["values"]) == 0:
             raise Exception(f"No MACD values: {macd_resp}")
 
         macd_data = macd_resp['values'][0]
-        macd_val_raw = macd_data.get('macd')
-        signal_val_raw = macd_data['macdsignal'] if 'macdsignal' in macd_data else macd_data.get('signal')
-
-        if macd_val_raw is None or signal_val_raw is None:
-            raise Exception(f"Missing MACD or signal values: {macd_data}")
-
-        macd_val = float(macd_val_raw)
-        signal_val = float(signal_val_raw)
+        try:
+            macd_val = float(macd_data['macd'])
+            signal_val = float(macd_data['macdsignal'])
+        except (KeyError, ValueError, TypeError) as e:
+            raise Exception(f"Invalid MACD values for {name}: {macd_data} — {str(e)}")
 
         # Bollinger Bands
         bb_url = f"https://api.twelvedata.com/bbands?symbol={symbol}&interval=1h&time_period=20&apikey={API_KEY}"
