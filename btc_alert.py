@@ -38,11 +38,10 @@ def send_telegram_chart(image_path, chat_id=None):
         data = {"chat_id": final_chat_id}
         requests.post(url, files=files, data=data)
 
-
 # MAIN LOOP
 for symbol, name in COINS.items():
     try:
-        outputsize = max(RSI_PERIOD, MA_PERIOD, 2)
+        outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
         r = requests.get(url)
         data = r.json()
@@ -60,6 +59,7 @@ for symbol, name in COINS.items():
         df["close"] = df["close"].astype(float)
         df = df[::-1].reset_index(drop=True)
 
+        # RSI calculation
         delta = df["close"].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -69,25 +69,47 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        if len(df) >= 2:
-            change_pct = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
-        else:
-            change_pct = 0.0
+        # 2h % change
+        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
+        # 24h % change
+        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
 
+        # MA50 and trend
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-
-        emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
-        status = (
-            "OVERSOLD" if last_rsi < 30 else
-            "OVERBOUGHT" if last_rsi > 70 else
-            "NEUTRAL (test alert)"
-        )
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
+        # MACD call
+        macd_url = f"https://api.twelvedata.com/macd?symbol={symbol}&interval=1h&apikey={API_KEY}"
+        macd_resp = requests.get(macd_url).json()
+
+        if "values" not in macd_resp:
+            raise Exception(f"MACD API error: {macd_resp}")
+
+        macd_val = float(macd_resp['values'][0]['macd'])
+        signal_val = float(macd_resp['values'][0]['signal'])
+
+        # Advies logica
+        if last_rsi < 30 and macd_val > signal_val:
+            advies = "STRONG BUY ✅"
+            trigger = True
+        elif last_rsi > 70 and macd_val < signal_val:
+            advies = "STRONG SELL ❌"
+            trigger = True
+        else:
+            advies = "WAIT ⚪"
+            trigger = False
+
+        if not trigger:
+            continue  # Skip alert als niet sterk genoeg
+
+        emoji = "📉" if last_rsi < 30 else "📈"
         msg = (
-            f"[{name}] RSI = {last_rsi:.2f} — {status} {emoji}\n"
-            f"Change (2h): {change_pct:.2f}%\n"
+            f"[{name}] RSI = {last_rsi:.2f} {emoji}\n"
+            f"MACD = {macd_val:.4f}, Signal = {signal_val:.4f}\n"
+            f"Advice: {advies}\n"
+            f"Change (2h): {change_pct_2h:.2f}%\n"
+            f"Change (24h): {change_pct_24h:.2f}%\n"
             f"Trend: {trend} (MA{MA_PERIOD})"
         )
 
@@ -110,11 +132,9 @@ for symbol, name in COINS.items():
         plt.savefig(image_path)
         plt.close()
 
-        # Send alert and chart to main chat
         send_telegram_alert(msg)
         send_telegram_chart(image_path)
 
-        # Send alert and chart to extra chat
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
