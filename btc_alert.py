@@ -85,7 +85,7 @@ for symbol, name in COINS.items():
             raise Exception(f"MACD API error: {macd_resp}")
         macd_data = macd_resp['values'][0]
         if 'macd' not in macd_data or 'macdsignal' not in macd_data:
-        raise Exception(f"Incomplete MACD data: {macd_data}")
+            raise Exception(f"Incomplete MACD data: {macd_data}")
         macd_val = float(macd_data['macd'])
         signal_val = float(macd_data['macdsignal'])
 
