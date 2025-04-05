@@ -35,6 +35,8 @@ def send_telegram_chart(image_path, chat_id=None):
         requests.post(url, files=files, data=data)
 
 # 🔁 MAIN LOOP
+any_trigger_sent = False
+
 for symbol, name in COINS.items():
     try:
         outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
@@ -83,7 +85,7 @@ for symbol, name in COINS.items():
         elif last_rsi > 70 and in_uptrend:
             advice = "*STRONG SELL ❌*"
         else:
-            continue  # Neutral → sla over
+            advice = "*NEUTRAL ⚪*"  # Voor testdoeleinden
 
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
@@ -96,6 +98,17 @@ for symbol, name in COINS.items():
             f"*Trend:* {trend} (MA{MA_PERIOD})\n"
             f"*Advice:* {advice}"
         )
+
+        # Alleen versturen als niet neutraal óf als test
+        if "NEUTRAL" not in advice:
+            any_trigger_sent = True
+            send_telegram_alert(msg)
+            send_telegram_chart(f"/tmp/chart_{symbol.replace('/', '_')}.png")
+
+            extra = os.environ.get('EXTRA_CHAT_ID')
+            if extra:
+                send_telegram_alert(msg, chat_id=extra)
+                send_telegram_chart(f"/tmp/chart_{symbol.replace('/', '_')}.png", chat_id=extra)
 
         # Grafiek maken
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
@@ -116,18 +129,20 @@ for symbol, name in COINS.items():
         plt.savefig(image_path)
         plt.close()
 
-        # Verstuur alerts en grafiek
-        send_telegram_alert(msg)
-        send_telegram_chart(image_path)
-
-        extra = os.environ.get('EXTRA_CHAT_ID')
-        if extra:
-            send_telegram_alert(msg, chat_id=extra)
-            send_telegram_chart(image_path, chat_id=extra)
-
     except Exception as e:
         msg = f"[ERROR] Exception bij {name}: {str(e)}"
         send_telegram_alert(msg)
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
+
+# 🧪 Testmelding als geen alerts verstuurd zijn
+if not any_trigger_sent:
+    try:
+        test_msg = "✅ *Test alert:* Script draait succesvol maar geen triggers (NEUTRAAL ⚪)."
+        send_telegram_alert(test_msg)
+        extra = os.environ.get('EXTRA_CHAT_ID')
+        if extra:
+            send_telegram_alert(test_msg, chat_id=extra)
+    except Exception as e:
+        print(f"Kon testbericht niet sturen: {e}")
