@@ -1,3 +1,5 @@
+# btc_alert.py
+
 import requests
 import pandas as pd
 import os
@@ -25,7 +27,8 @@ def send_telegram_alert(message, chat_id=None):
 for symbol, name in COINS.items():
     try:
         # Haal candle data op (voor RSI + % change)
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={RSI_PERIOD}&apikey={API_KEY}"
+        outputsize = max(RSI_PERIOD, 2)  # minimaal 2 candles nodig voor % change
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
         r = requests.get(url)
         data = r.json()
 
@@ -41,7 +44,7 @@ for symbol, name in COINS.items():
         df["close"] = df["close"].astype(float)
         df = df[::-1]  # draai om naar chronologische volgorde
 
-        # RSI berekenen
+        # RSI berekenen over 14 candles
         delta = df["close"].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -51,8 +54,11 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # % change berekenen over periode
-        change_pct = ((df["close"].iloc[-1] - df["close"].iloc[0]) / df["close"].iloc[0]) * 100
+        # % change over laatste 2 candles (2 uur)
+        if len(df) >= 2:
+            change_pct = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
+        else:
+            change_pct = 0.0
 
         # Bericht opstellen
         emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
@@ -63,7 +69,7 @@ for symbol, name in COINS.items():
         )
         msg = (
             f"[{name}] RSI = {last_rsi:.2f} — {status} {emoji}\n"
-            f"Change ({RSI_PERIOD}h): {change_pct:.2f}%"
+            f"Change (2h): {change_pct:.2f}%"
         )
 
         # Telegram versturen
