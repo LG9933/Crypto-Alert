@@ -89,23 +89,11 @@ for symbol, name in COINS.items():
 
         # Bericht opstellen
         msg = (
-    f"*{name}*
-"
-    f"*RSI:* {last_rsi:.2f}
-"
-    f"*Change (2h):* {change_pct_2h:.2f}%
-"
-    f"*Change (24h):* {change_pct_24h:.2f}%
-"
-    f"*Trend:* {trend} (MA{MA_PERIOD})
-"
-    f"*Advice:* {advice}"
-):* {change_pct_2h:.2f}%
-"
-            f"*Change (24h):* {change_pct_24h:.2f}%
-"
-            f"*Trend:* {trend} (MA{MA_PERIOD})
-"
+            f"*{name}*\n"
+            f"*RSI:* {last_rsi:.2f}\n"
+            f"*Change (2h):* {change_pct_2h:.2f}%\n"
+            f"*Change (24h):* {change_pct_24h:.2f}%\n"
+            f"*Trend:* {trend} (MA{MA_PERIOD})\n"
             f"*Advice:* {advice}"
         )
 
