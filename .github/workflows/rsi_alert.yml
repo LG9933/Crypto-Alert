@@ -2,8 +2,8 @@ name: RSI Alert
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # elke 2 uur
-  workflow_dispatch:
+    - cron: '0 */2 * * *'  # draait elke 2 uur
+  workflow_dispatch:        # handmatig starten via GitHub
 
 jobs:
   check-rsi:
