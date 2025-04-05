@@ -11,10 +11,10 @@ Automated RSI and trend analysis for cryptocurrencies (BTC, SOL, LINK) with Tele
 - Telegram alert with image
 
 ## Required (GitHub Secrets)
-- `BOT_TOKEN`: Your Telegram bot token (via BotFather)
-- `CHAT_ID`: Your personal Telegram chat ID
+- `BOT_TOKEN`: Telegram bot token
+- `CHAT_ID`: Personal chat ID
 - `EXTRA_CHAT_ID`: (optional) ID of additional recipient
-- `TWELVE_API_KEY`: Free API key from https://twelvedata.com
+- `TWELVE_API_KEY`: API calls for prices
 
 ## Coins
 Default: BTC/USD, SOL/USD, LINK/USD
