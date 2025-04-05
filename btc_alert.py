@@ -1,5 +1,3 @@
-# btc_alert.py
-
 import requests
 import pandas as pd
 import os
@@ -23,7 +21,7 @@ def send_telegram_alert(message, chat_id=None):
     default_chat_id = os.environ['CHAT_ID']
     final_chat_id = chat_id if chat_id else default_chat_id
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": final_chat_id, "text": message}
+    payload = {"chat_id": final_chat_id, "text": message, "parse_mode": "Markdown"}
     requests.post(url, data=payload)
 
 def send_telegram_chart(image_path, chat_id=None):
@@ -39,7 +37,7 @@ def send_telegram_chart(image_path, chat_id=None):
 # 🔁 MAIN LOOP
 for symbol, name in COINS.items():
     try:
-        outputsize = max(RSI_PERIOD, MA_PERIOD, 2)
+        outputsize = max(RSI_PERIOD, MA_PERIOD, 26)
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
         r = requests.get(url)
         data = r.json()
@@ -68,28 +66,41 @@ for symbol, name in COINS.items():
         last_rsi = rsi.iloc[-1]
 
         # % change laatste 2 candles
-        if len(df) >= 2:
-            change_pct = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
-        else:
-            change_pct = 0.0
+        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
+
+        # % change laatste 24 uur (25 candles)
+        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
 
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
 
-        # Bericht opstellen
-        emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
-        status = (
-            "OVERSOLD" if last_rsi < 30 else
-            "OVERBOUGHT" if last_rsi > 70 else
-            "NEUTRAAL (test alert)"
-        )
+        # Trend + RSI advies combineren
+        if last_rsi < 30 and not in_uptrend:
+            advice = "*STRONG BUY ✅🟢*"
+        elif last_rsi < 30:
+            advice = "*BUY 🟢*"
+        elif last_rsi > 70 and not in_uptrend:
+            advice = "*STRONG SELL ❌🔴*"
+        elif last_rsi > 70:
+            advice = "*SELL 🔴*"
+        else:
+            advice = "WAIT ⚪"
+
+        # Alleen alerts bij BUY/SELL
+        if "WAIT" in advice:
+            continue
+
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
         msg = (
-            f"[{name}] RSI = {last_rsi:.2f} — {status} {emoji}\n"
-            f"Change (2h): {change_pct:.2f}%\n"
-            f"Trend: {trend} (MA{MA_PERIOD})"
+            f"*{name}*
+"
+            f"*RSI:* {last_rsi:.2f}\n"
+            f"*Trend:* {trend} (MA{MA_PERIOD})\n"
+            f"*Advice:* {advice}\n"
+            f"*Change (2h):* {change_pct_2h:.2f}%\n"
+            f"*Change (24h):* {change_pct_24h:.2f}%"
         )
 
         # Grafiek maken
