@@ -1,14 +1,29 @@
 # Crypto RSI Alert Bot
 
-Automated RSI and trend analysis for cryptocurrencies (BTC, SOL, LINK) with Telegram alerts, chart generation, and scheduled GitHub Actions runs.
+Automated RSI, MACD, and Bollinger Bands analysis for cryptocurrencies (BTC, SOL, LINK) with Telegram alerts, chart generation, and scheduled GitHub Actions runs.
 
 ## Features
-- Runs every 2 hours via GitHub Actions
-- RSI calculation (14 candles, 1h interval)
-- % price change over the last 2 hours
-- MA50 trend filter (up/down trend)
-- Chart with price, MA, and RSI
-- Telegram alert with image
+- Runs every hour via GitHub Actions
+- RSI calculation (14 periods, 1h interval)
+- MACD and Signal line comparison
+- Bollinger Bands analysis (Upper / Lower band triggers)
+- % price change over the last 2h and 24h
+- MA50 trend detection
+- Alerts only sent when at least one indicator is in a strong zone (RSI/MACD/BB)
+- Markdown-styled alerts with sentiment labels and emoji
+- Chart with price and RSI sent as Telegram image
+
+## Example Alert (via Telegram)
+```
+*Bitcoin*
+*RSI:* 28.31 → _Bullish 🟢_
+*MACD:* 0.0154 vs -0.0021 → _Bullish 🟢_
+*BBANDS:* 66400.32 < lower → _Bullish 🟢_
+*Advice:* *STRONG BUY ✅*
+*Change (2h):* -3.91%
+*Change (24h):* -7.32%
+*Trend:* ↓ DOWN (MA50)
+```
 
 ## Required (GitHub Secrets)
 - `BOT_TOKEN`: Telegram bot token
@@ -20,11 +35,16 @@ Automated RSI and trend analysis for cryptocurrencies (BTC, SOL, LINK) with Tele
 Default: BTC/USD, SOL/USD, LINK/USD
 Easily extendable in the `COINS = {}` section in `btc_alert.py`
 
-## Example Alert
+## Example Alert (via Telegram)
 ```
-[Bitcoin] RSI = 69.41 — OVERBOUGHT
-Change (2h): +3.12%
-Trend: ↑ UP (MA50)
+*Bitcoin*
+*RSI:* 28.31 → _Bullish 🟢_
+*MACD:* 0.0154 vs -0.0021 → _Bullish 🟢_
+*BBANDS:* 66400.32 < lower → _Bullish 🟢_
+*Advice:* *STRONG BUY ✅*
+*Change (2h):* -3.91%
+*Change (24h):* -7.32%
+*Trend:* ↓ DOWN (MA50)
 ```
 
 Includes a visual chart with price and RSI.
