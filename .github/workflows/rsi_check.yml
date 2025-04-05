@@ -1,0 +1,24 @@
+name: RSI Crypto Alert
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # elke 2 uur
+  workflow_dispatch:       # handmatig triggeren
+
+jobs:
+  rsi-alert:
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install pandas ta requests
+      - name: Run RSI Alert
+        run: python btc_alert.py
