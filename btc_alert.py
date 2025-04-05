@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 import datetime
 
-# 🧠 CONFIG
+# CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
     "BTC/USD": "Bitcoin",
@@ -17,7 +17,8 @@ INTERVAL = "1h"
 RSI_PERIOD = 14
 MA_PERIOD = 50
 
-# ✅ TELEGRAM
+# TELEGRAM
+
 def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
     default_chat_id = os.environ['CHAT_ID']
@@ -25,6 +26,7 @@ def send_telegram_alert(message, chat_id=None):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": final_chat_id, "text": message}
     requests.post(url, data=payload)
+
 
 def send_telegram_chart(image_path, chat_id=None):
     token = os.environ['BOT_TOKEN']
@@ -36,7 +38,8 @@ def send_telegram_chart(image_path, chat_id=None):
         data = {"chat_id": final_chat_id}
         requests.post(url, files=files, data=data)
 
-# 🔁 MAIN LOOP
+
+# MAIN LOOP
 for symbol, name in COINS.items():
     try:
         outputsize = max(RSI_PERIOD, MA_PERIOD, 2)
@@ -45,7 +48,7 @@ for symbol, name in COINS.items():
         data = r.json()
 
         if "values" not in data:
-            msg = f"[ERROR] Geen data voor {name}: {data.get('message', 'Onbekende fout')}"
+            msg = f"[ERROR] No data for {name}: {data.get('message', 'Unknown error')}"
             send_telegram_alert(msg)
             extra = os.environ.get('EXTRA_CHAT_ID')
             if extra:
@@ -57,7 +60,6 @@ for symbol, name in COINS.items():
         df["close"] = df["close"].astype(float)
         df = df[::-1].reset_index(drop=True)
 
-        # RSI berekening
         delta = df["close"].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -67,22 +69,19 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # % change laatste 2 candles
         if len(df) >= 2:
             change_pct = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
         else:
             change_pct = 0.0
 
-        # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
 
-        # Bericht opstellen
         emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
         status = (
             "OVERSOLD" if last_rsi < 30 else
             "OVERBOUGHT" if last_rsi > 70 else
-            "NEUTRAAL (test alert)"
+            "NEUTRAL (test alert)"
         )
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
@@ -92,8 +91,8 @@ for symbol, name in COINS.items():
             f"Trend: {trend} (MA{MA_PERIOD})"
         )
 
-        # Grafiek maken
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+        # Create chart
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
         ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
         ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
         ax1.set_title(f"{name} Price + MA{MA_PERIOD}")
@@ -111,17 +110,18 @@ for symbol, name in COINS.items():
         plt.savefig(image_path)
         plt.close()
 
-        # Verstuur alerts en grafiek
+        # Send alert and chart to main chat
         send_telegram_alert(msg)
         send_telegram_chart(image_path)
 
+        # Send alert and chart to extra chat
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
             send_telegram_chart(image_path, chat_id=extra)
 
     except Exception as e:
-        msg = f"[ERROR] Exception bij {name}: {str(e)}"
+        msg = f"[ERROR] Exception for {name}: {str(e)}"
         send_telegram_alert(msg)
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
