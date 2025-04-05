@@ -90,7 +90,7 @@ for symbol, name in COINS.items():
 
         # Bericht opstellen
         msg = (
-            f"*{name}*
+    f"*{name}*
 "
             f"*RSI:* {last_rsi:.2f} → _{sentiment}_\n"
             f"*Advice:* {status}\n"
@@ -132,4 +132,5 @@ for symbol, name in COINS.items():
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
+
 
