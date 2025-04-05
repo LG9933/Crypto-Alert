@@ -36,6 +36,7 @@ def send_telegram_chart(image_path, chat_id=None):
 
 # 🔁 MAIN LOOP
 any_trigger_sent = False
+change_24h_summary = {}
 
 for symbol, name in COINS.items():
     try:
@@ -70,6 +71,7 @@ for symbol, name in COINS.items():
         # % change 2h en 24h
         change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
+        change_24h_summary[name] = change_pct_24h
 
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
@@ -85,7 +87,7 @@ for symbol, name in COINS.items():
         elif last_rsi > 70 and in_uptrend:
             advice = "*STRONG SELL ❌*"
         else:
-            advice = "*NEUTRAL ⚪*"  # Voor testdoeleinden
+            advice = "*NEUTRAL ⚪*"
 
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
@@ -99,16 +101,17 @@ for symbol, name in COINS.items():
             f"*Advice:* {advice}"
         )
 
-        # Alleen versturen als niet neutraal óf als test
+        # Alleen versturen als niet neutraal
         if "NEUTRAL" not in advice:
             any_trigger_sent = True
             send_telegram_alert(msg)
-            send_telegram_chart(f"/tmp/chart_{symbol.replace('/', '_')}.png")
+            image_path = f"/tmp/chart_{symbol.replace('/', '_')}.png"
+            send_telegram_chart(image_path)
 
             extra = os.environ.get('EXTRA_CHAT_ID')
             if extra:
                 send_telegram_alert(msg, chat_id=extra)
-                send_telegram_chart(f"/tmp/chart_{symbol.replace('/', '_')}.png", chat_id=extra)
+                send_telegram_chart(image_path, chat_id=extra)
 
         # Grafiek maken
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
@@ -136,13 +139,16 @@ for symbol, name in COINS.items():
         if extra:
             send_telegram_alert(msg, chat_id=extra)
 
-# 🧪 Testmelding als geen alerts verstuurd zijn
-if not any_trigger_sent:
+# 📅 Dagelijkse 24h change rapport om 10:00
+now = datetime.datetime.now()
+if now.hour == 10:
     try:
-        test_msg = "✅ *Test alert:* Script draait succesvol maar geen triggers (NEUTRAAL ⚪)."
-        send_telegram_alert(test_msg)
+        report = ["📊 *24h Price Change Overview*"]
+        for name, pct in change_24h_summary.items():
+            report.append(f"- {name}: {pct:+.2f}%")
+        send_telegram_alert("\n".join(report))
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
-            send_telegram_alert(test_msg, chat_id=extra)
+            send_telegram_alert("\n".join(report), chat_id=extra)
     except Exception as e:
-        print(f"Kon testbericht niet sturen: {e}")
+        print(f"Fout bij verzenden daily 24h change report: {e}")
