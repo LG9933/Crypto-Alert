@@ -81,11 +81,9 @@ for symbol, name in COINS.items():
         # MACD with validation
         macd_url = f"https://api.twelvedata.com/macd?symbol={symbol}&interval=1h&apikey={API_KEY}"
         macd_resp = requests.get(macd_url).json()
-        if "values" not in macd_resp:
-            raise Exception(f"MACD API error: {macd_resp}")
+        if "values" not in macd_resp or len(macd_resp["values"]) == 0:
+            raise Exception(f"No MACD values: {macd_resp}")
         macd_data = macd_resp['values'][0]
-        if 'macd' not in macd_data or 'macdsignal' not in macd_data:
-            raise Exception(f"Incomplete MACD data: {macd_data}")
         macd_val = float(macd_data['macd'])
         signal_val = float(macd_data['macdsignal'])
 
