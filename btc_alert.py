@@ -37,7 +37,7 @@ def send_telegram_chart(image_path, chat_id=None):
 # 🔁 MAIN LOOP
 for symbol, name in COINS.items():
     try:
-        outputsize = max(RSI_PERIOD, MA_PERIOD, 26)
+        outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
         r = requests.get(url)
         data = r.json()
@@ -65,42 +65,41 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # % change laatste 2 candles
+        # % change 2h en 24h
         change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
-
-        # % change laatste 24 uur (25 candles)
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
 
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
 
-        # Trend + RSI advies combineren
-        if last_rsi < 30 and not in_uptrend:
-            advice = "*STRONG BUY ✅🟢*"
-        elif last_rsi < 30:
+        # Advies op basis van RSI en MA
+        if last_rsi < 30 and in_uptrend:
             advice = "*BUY 🟢*"
+        elif last_rsi < 30 and not in_uptrend:
+            advice = "*STRONG BUY ✅*"
         elif last_rsi > 70 and not in_uptrend:
-            advice = "*STRONG SELL ❌🔴*"
-        elif last_rsi > 70:
             advice = "*SELL 🔴*"
+        elif last_rsi > 70 and in_uptrend:
+            advice = "*STRONG SELL ❌*"
         else:
-            advice = "WAIT ⚪"
-
-        # Alleen alerts bij BUY/SELL
-        if "WAIT" in advice:
-            continue
+            continue  # Neutral → sla over
 
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
+        # Bericht opstellen
         msg = (
             f"*{name}*
 "
-            f"*RSI:* {last_rsi:.2f}\n"
-            f"*Trend:* {trend} (MA{MA_PERIOD})\n"
-            f"*Advice:* {advice}\n"
-            f"*Change (2h):* {change_pct_2h:.2f}%\n"
-            f"*Change (24h):* {change_pct_24h:.2f}%"
+            f"*RSI:* {last_rsi:.2f}
+"
+            f"*Change (2h):* {change_pct_2h:.2f}%
+"
+            f"*Change (24h):* {change_pct_24h:.2f}%
+"
+            f"*Trend:* {trend} (MA{MA_PERIOD})
+"
+            f"*Advice:* {advice}"
         )
 
         # Grafiek maken
