@@ -1,61 +1,80 @@
-# btc_alert.py
-
 import requests
 import pandas as pd
-import ta
 import os
 
-# Telegram alert functie
-def send_telegram_alert(message, custom_chat_id=None):
+# 🧠 CONFIG
+API_KEY = os.environ['TWELVE_API_KEY']
+COINS = {
+    "BTC/USD": "Bitcoin",
+    "SOL/USD": "Solana",
+    "LINK/USD": "Chainlink"
+}
+INTERVAL = "1h"
+RSI_PERIOD = 14
+
+# ✅ TELEGRAM
+def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
-    chat_id = custom_chat_id if custom_chat_id else os.environ['CHAT_ID']
+    default_chat_id = os.environ['CHAT_ID']
+    final_chat_id = chat_id if chat_id else default_chat_id
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message
-    }
+    payload = {"chat_id": final_chat_id, "text": message}
     requests.post(url, data=payload)
 
-# Coins die je wil checken
-coins = ["BTCUSDT", "SOLUSDT", "LINKUSDT"]
-
-# Extra ontvanger toevoegen (optioneel)
-extra_chat_id = os.environ.get('EXTRA_CHAT_ID')
-
-for coin in coins:
-    url = f"https://api.binance.com/api/v3/klines?symbol={coin}&interval=1h&limit=100"
+# 🔁 MAIN LOOP
+for symbol, name in COINS.items():
     try:
-        resp = requests.get(url)
-        data = resp.json()
+        # Haal candle data op (voor RSI + % change)
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={RSI_PERIOD}&apikey={API_KEY}"
+        r = requests.get(url)
+        data = r.json()
 
-        # Check of de data geldig is (lijst met candles)
-        if not isinstance(data, list):
-            msg = f"[ERROR] Geen geldige data voor {coin}: {data}"
+        if "values" not in data:
+            msg = f"[ERROR] Geen data voor {name}: {data.get('message', 'Onbekende fout')}"
             send_telegram_alert(msg)
-            if extra_chat_id:
-                send_telegram_alert(msg, custom_chat_id=extra_chat_id)
+            extra = os.environ.get('EXTRA_CHAT_ID')
+            if extra:
+                send_telegram_alert(msg, chat_id=extra)
             continue
 
-        closes = [float(candle[4]) for candle in data]
-        df = pd.DataFrame(closes, columns=["close"])
+        df = pd.DataFrame(data["values"])
+        df["close"] = df["close"].astype(float)
+        df = df[::-1]  # draai om naar chronologische volgorde
 
-        rsi = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi().iloc[-1]
+        # RSI berekenen
+        delta = df["close"].diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        avg_gain = gain.rolling(window=RSI_PERIOD).mean()
+        avg_loss = loss.rolling(window=RSI_PERIOD).mean()
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        last_rsi = rsi.iloc[-1]
 
-        pct_change = ((df["close"].iloc[-1] - df["close"].iloc[0]) / df["close"].iloc[0]) * 100
+        # % change berekenen over periode
+        change_pct = ((df["close"].iloc[-1] - df["close"].iloc[0]) / df["close"].iloc[0]) * 100
 
-        if rsi < 30:
-            message = f"[{coin}] RSI = {rsi:.2f} — OVERSOLD! 📉\nChange (100h): {pct_change:.2f}%"
-        elif rsi > 70:
-            message = f"[{coin}] RSI = {rsi:.2f} — OVERBOUGHT! 📈\nChange (100h): {pct_change:.2f}%"
-        else:
-            message = f"[{coin}] RSI = {rsi:.2f} — NEUTRAAL\nChange (100h): {pct_change:.2f}% (test alert)"
+        # Bericht opstellen
+        emoji = "📉" if last_rsi < 30 else "📈" if last_rsi > 70 else "🔄"
+        status = (
+            "OVERSOLD" if last_rsi < 30 else
+            "OVERBOUGHT" if last_rsi > 70 else
+            "NEUTRAAL (test alert)"
+        )
+        msg = (
+            f"[{name}] RSI = {last_rsi:.2f} — {status} {emoji}\n"
+            f"Change ({RSI_PERIOD}h): {change_pct:.2f}%"
+        )
 
-        send_telegram_alert(message)
-        if extra_chat_id:
-            send_telegram_alert(message, custom_chat_id=extra_chat_id)
+        # Telegram versturen
+        send_telegram_alert(msg)
+        extra = os.environ.get('EXTRA_CHAT_ID')
+        if extra:
+            send_telegram_alert(msg, chat_id=extra)
 
     except Exception as e:
-        msg = f"[ERROR] Exception bij {coin}: {str(e)}"
+        msg = f"[ERROR] Exception bij {name}: {str(e)}"
         send_telegram_alert(msg)
-        if extra_chat_id:
-            send_telegram_alert(msg, custom_chat_id=extra_chat_id)
+        extra = os.environ.get('EXTRA_CHAT_ID')
+        if extra:
+            send_telegram_alert(msg, chat_id=extra)
