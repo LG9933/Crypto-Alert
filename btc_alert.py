@@ -84,10 +84,10 @@ for symbol, name in COINS.items():
         if "values" not in macd_resp:
             raise Exception(f"MACD API error: {macd_resp}")
         macd_data = macd_resp['values'][0]
-        if 'macd' not in macd_data or 'signal' not in macd_data:
-            raise Exception(f"Incomplete MACD data: {macd_data}")
+        if 'macd' not in macd_data or 'macdsignal' not in macd_data:
+        raise Exception(f"Incomplete MACD data: {macd_data}")
         macd_val = float(macd_data['macd'])
-        signal_val = float(macd_data['signal'])
+        signal_val = float(macd_data['macdsignal'])
 
         # Bollinger Bands
         bb_url = f"https://api.twelvedata.com/bbands?symbol={symbol}&interval=1h&time_period=20&apikey={API_KEY}"
