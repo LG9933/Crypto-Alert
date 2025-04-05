@@ -14,12 +14,16 @@ jobs:
       EXTRA_CHAT_ID: ${{ secrets.EXTRA_CHAT_ID }}
       TWELVE_API_KEY: ${{ secrets.TWELVE_API_KEY }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install dependencies
-        run: pip install requests pandas
-      - name: Run RSI Alert
+        run: pip install requests pandas matplotlib
+
+      - name: Run RSI Alert script
         run: python btc_alert.py
