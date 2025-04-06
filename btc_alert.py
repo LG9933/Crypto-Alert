@@ -37,6 +37,8 @@ def send_telegram_chart(image_path, chat_id=None):
 # 🔁 MAIN LOOP
 any_trigger_sent = False
 change_24h_summary = {}
+change_2h_summary = {}
+trend_map = {}
 
 for symbol, name in COINS.items():
     try:
@@ -58,14 +60,6 @@ for symbol, name in COINS.items():
         df["close"] = df["close"].astype(float)
         df = df[::-1].reset_index(drop=True)
 
-        if "volume" in df.columns:
-            df["volume"] = df["volume"].astype(float)
-            last_volume = df["volume"].iloc[-1]
-            volume_ma = df["volume"].rolling(window=MA_PERIOD).mean().iloc[-1]
-        else:
-            last_volume = 0
-            volume_ma = 0
-
         delta = df["close"].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -76,36 +70,52 @@ for symbol, name in COINS.items():
         last_rsi = rsi.iloc[-1]
 
         change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
+        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-3]) / df["close"].iloc[-3]) * 100 if len(df) >= 3 else 0.0
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
         change_24h_summary[name] = change_pct_24h
+        change_2h_summary[name] = change_pct_2h
 
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-        trend = "UP" if in_uptrend else "DOWN"
+        trend = "↑ UP" if in_uptrend else "↓ DOWN"
+        trend_emoji = "📈" if in_uptrend else "📉"
+        trend_map[name] = f"{trend_emoji} {trend}"
 
-        if change_pct_1h > 3 and last_volume > 0 and last_volume > volume_ma:
-            advice = "*STRONG BUY*\nSentiment: Bullish + Volume Spike"
-        elif change_pct_1h < -3 and last_volume > 0 and last_volume > volume_ma:
-            advice = "*STRONG SELL*\nSentiment: Bearish + Volume Spike"
-        elif last_rsi < 30 and in_uptrend:
+        # RSI status emoji
+        if last_rsi < 25:
+            rsi_label = f"🔻 *RSI:* {last_rsi:.2f} → _Oversold_"
+        elif last_rsi > 75:
+            rsi_label = f"🔺 *RSI:* {last_rsi:.2f} → _Overbought_"
+        else:
+            rsi_label = f"⚪ *RSI:* {last_rsi:.2f} → _Neutral_"
+
+        # Price change emojis
+        ch1h_emoji = "📈" if change_pct_1h > 0 else "📉"
+        ch24h_emoji = "📈" if change_pct_24h > 0 else "📉"
+
+        # Advice logic (minder gevoelig)
+        if change_pct_1h > 4:
+            advice = "*STRONG BUY*\nSentiment: Price Jump"
+        elif change_pct_1h < -4:
+            advice = "*STRONG SELL*\nSentiment: Price Dump"
+        elif last_rsi < 25 and in_uptrend:
             advice = "*BUY*\nSentiment: Oversold + Uptrend"
-        elif last_rsi < 30 and not in_uptrend:
+        elif last_rsi < 25 and not in_uptrend:
             advice = "*STRONG BUY*\nSentiment: Oversold + Downtrend"
-        elif last_rsi > 70 and not in_uptrend:
+        elif last_rsi > 75 and not in_uptrend:
             advice = "*STRONG SELL*\nSentiment: Overbought + Downtrend"
-        elif last_rsi > 70 and in_uptrend:
+        elif last_rsi > 75 and in_uptrend:
             advice = "*SELL*\nSentiment: Overbought + Uptrend"
         else:
             advice = "*NEUTRAL*"
 
         msg = (
             f"*{name}*\n"
-            f"*RSI:* {last_rsi:.2f}\n"
-            f"*Change (1h):* {change_pct_1h:.2f}%\n"
-            f"*Change (24h):* {change_pct_24h:.2f}%\n"
-            f"*Trend:* {trend} (MA{MA_PERIOD})\n"
-            f"*Volume:* {last_volume:.0f} vs MA: {volume_ma:.0f}\n"
-            f"*Advice:* {advice}"
+            f"{rsi_label}\n"
+            f"⏱ *1h Change:* {ch1h_emoji} {change_pct_1h:.2f}%\n"
+            f"📆 *24h Change:* {ch24h_emoji} {change_pct_24h:.2f}%\n"
+            f"{trend_emoji} *Trend:* {trend} (MA{MA_PERIOD})\n"
+            f"{advice}"
         )
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
@@ -142,16 +152,25 @@ for symbol, name in COINS.items():
         if extra:
             send_telegram_alert(msg, chat_id=extra)
 
-# ⏱️ 24h Change Report for BTC Only (Every 2 Hours)
+# ⏱️ 2-uur Bitcoin update met kleur en trend
 now = datetime.datetime.now()
 if now.hour % 2 == 0:
     try:
-        if "Bitcoin" in change_24h_summary:
-            pct = change_24h_summary["Bitcoin"]
-            message = f"24h BTC Change: {pct:+.2f}%"
-            send_telegram_alert(message)
+        if "Bitcoin" in change_2h_summary and "Bitcoin" in change_24h_summary:
+            ch2h = change_2h_summary["Bitcoin"]
+            ch24h = change_24h_summary["Bitcoin"]
+            emoji_2h = "📈" if ch2h > 0 else "📉"
+            emoji_24h = "📈" if ch24h > 0 else "📉"
+            trend_str = trend_map.get("Bitcoin", "")
+            msg = (
+                f"📊 *Bitcoin Overview*\n"
+                f"⏱ *2h Change:* {emoji_2h} {ch2h:+.2f}%\n"
+                f"📆 *24h Change:* {emoji_24h} {ch24h:+.2f}%\n"
+                f"{trend_str}"
+            )
+            send_telegram_alert(msg)
             extra = os.environ.get('EXTRA_CHAT_ID')
             if extra:
-                send_telegram_alert(message, chat_id=extra)
+                send_telegram_alert(msg, chat_id=extra)
     except Exception as e:
-        print(f"Fout bij verzenden BTC 24h report: {e}")
+        print(f"Fout bij verzenden BTC 2h report: {e}")
