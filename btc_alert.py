@@ -58,7 +58,6 @@ for symbol, name in COINS.items():
         df["close"] = df["close"].astype(float)
         df = df[::-1].reset_index(drop=True)
 
-        # Volume toevoegen als beschikbaar
         if "volume" in df.columns:
             df["volume"] = df["volume"].astype(float)
             last_volume = df["volume"].iloc[-1]
@@ -67,7 +66,6 @@ for symbol, name in COINS.items():
             last_volume = 0
             volume_ma = 0
 
-        # RSI berekening
         delta = df["close"].diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
@@ -77,33 +75,29 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # % change 1h en 24h
         change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
         change_24h_summary[name] = change_pct_24h
 
-        # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-        trend = "↑ UP" if in_uptrend else "↓ DOWN"
+        trend = "UP" if in_uptrend else "DOWN"
 
-        # 📈 Momentum + RSI + Trend based advies
         if change_pct_1h > 3 and last_volume > 0 and last_volume > volume_ma:
-            advice = "*STRONG BUY 🚀*\nSentiment: _Bullish + Volume Spike 📈_"
+            advice = "*STRONG BUY*\nSentiment: Bullish + Volume Spike"
         elif change_pct_1h < -3 and last_volume > 0 and last_volume > volume_ma:
-            advice = "*STRONG SELL 💥*\nSentiment: _Bearish + Volume Spike 📉_"
+            advice = "*STRONG SELL*\nSentiment: Bearish + Volume Spike"
         elif last_rsi < 30 and in_uptrend:
-            advice = "*BUY 🟢*\nSentiment: _Oversold + Uptrend_"
+            advice = "*BUY*\nSentiment: Oversold + Uptrend"
         elif last_rsi < 30 and not in_uptrend:
-            advice = "*STRONG BUY ✅*\nSentiment: _Oversold + Downtrend_"
+            advice = "*STRONG BUY*\nSentiment: Oversold + Downtrend"
         elif last_rsi > 70 and not in_uptrend:
-            advice = "*STRONG SELL ❌*\nSentiment: _Overbought + Downtrend_"
+            advice = "*STRONG SELL*\nSentiment: Overbought + Downtrend"
         elif last_rsi > 70 and in_uptrend:
-            advice = "*SELL 🔴*\nSentiment: _Overbought + Uptrend_"
+            advice = "*SELL*\nSentiment: Overbought + Uptrend"
         else:
-            advice = "*NEUTRAL ⚪*"
+            advice = "*NEUTRAL*"
 
-        # Bericht opstellen
         msg = (
             f"*{name}*\n"
             f"*RSI:* {last_rsi:.2f}\n"
@@ -114,7 +108,6 @@ for symbol, name in COINS.items():
             f"*Advice:* {advice}"
         )
 
-        # Grafiek maken vóór versturen
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
         ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
         ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
@@ -149,11 +142,11 @@ for symbol, name in COINS.items():
         if extra:
             send_telegram_alert(msg, chat_id=extra)
 
-# 📅 Dagelijkse 24h change rapport om 10:00
+# 📅 Daily 24h change report (only if data is available)
 now = datetime.datetime.now()
-if now.hour == 10:
+if now.hour == 10 and len(change_24h_summary) > 0:
     try:
-        report = ["📊 *24h Price Change Overview*"]
+        report = ["*24h Price Change Overview*"]
         for name, pct in change_24h_summary.items():
             report.append(f"- {name}: {pct:+.2f}%")
         message = "\n".join(report)
