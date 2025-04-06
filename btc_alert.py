@@ -39,8 +39,11 @@ def send_telegram_chart(image_path, chat_id=None):
 # 🔁 COOLDOWN LOGIC
 def load_cooldowns():
     if os.path.exists(COOLDOWN_FILE):
-        with open(COOLDOWN_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(COOLDOWN_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 def save_cooldowns(cooldowns):
@@ -92,7 +95,6 @@ for symbol, name in COINS.items():
         trend_emoji = "📈" if in_uptrend else "📉"
         trend_map[name] = f"{trend_emoji} {trend}"
 
-        # RSI status emoji
         if last_rsi < 25:
             rsi_label = f"🔻 *RSI:* {last_rsi:.2f} → _Oversold_"
         elif last_rsi > 75:
@@ -100,11 +102,9 @@ for symbol, name in COINS.items():
         else:
             rsi_label = f"⚪ *RSI:* {last_rsi:.2f} → _Neutral_"
 
-        # Price change emojis
         ch1h_emoji = "📈" if change_pct_1h > 0 else "📉"
         ch24h_emoji = "📈" if change_pct_24h > 0 else "📉"
 
-        # Advice logic (minder gevoelig)
         if change_pct_1h > 4:
             advice = "*STRONG BUY*\nSentiment: Price Jump"
         elif change_pct_1h < -4:
@@ -120,20 +120,19 @@ for symbol, name in COINS.items():
         else:
             advice = "*NEUTRAL*"
 
-        # Cooldown check
         cooldown_key = f"{name}_{advice}"
         cooldown_ok = True
         if advice != "*NEUTRAL*":
-            last_alert_time = cooldowns.get(cooldown_key, 0)
+            last_alert_time = float(cooldowns.get(cooldown_key, 0))
             time_since = timestamp_now - last_alert_time
-            if time_since < 7200:  # 2 uur cooldown
-                # uitzonderingen toestaan bij sterke extra beweging
+            if time_since < 7200:
                 if (abs(change_pct_1h) > 6 or last_rsi < 20 or last_rsi > 80):
                     cooldown_ok = True
+                    print(f"[OVERRIDE] {name} trigger overschrijdt drempel ondanks cooldown.")
                 else:
                     cooldown_ok = False
+                    print(f"[COOLDOWN] {name} wordt overgeslagen (recent alert).")
 
-        # Bericht opstellen en versturen
         if advice != "*NEUTRAL*" and cooldown_ok:
             msg = (
                 f"*{name}*\n"
@@ -174,7 +173,6 @@ for symbol, name in COINS.items():
     except Exception as e:
         print(f"[ERROR] Exception bij {name}: {str(e)}")
 
-# ⏱️ 2-uur Bitcoin update met kleur en trend
 if now.hour % 2 == 0:
     try:
         if "Bitcoin" in change_2h_summary and "Bitcoin" in change_24h_summary:
@@ -196,5 +194,4 @@ if now.hour % 2 == 0:
     except Exception as e:
         print(f"Fout bij verzenden BTC 2h report: {e}")
 
-# 💾 Save cooldowns
 save_cooldowns(cooldowns)
