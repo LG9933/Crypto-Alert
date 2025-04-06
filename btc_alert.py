@@ -15,8 +15,8 @@ COINS = {
 INTERVAL = "1h"
 RSI_PERIOD = 14
 MA_PERIOD = 50
-COOLDOWN_FILE = ".cooldowns/alert_cooldowns.json"
-COOLDOWN_MINUTES = 120  # 2 uur
+COOLDOWN_DIR = ".cooldowns"
+BTC_OVERVIEW_THRESHOLD = 2.5  # 24h change trigger threshold
 
 # ✅ TELEGRAM
 def send_telegram_alert(message, chat_id=None):
@@ -37,33 +37,24 @@ def send_telegram_chart(image_path, chat_id=None):
         data = {"chat_id": final_chat_id}
         requests.post(url, files=files, data=data)
 
-# ⏱️ Cooldown opslag en check
-def load_cooldowns():
-    if os.path.exists(COOLDOWN_FILE):
-        with open(COOLDOWN_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# 🕒 Cooldown check
+os.makedirs(COOLDOWN_DIR, exist_ok=True)
+def is_on_cooldown(coin):
+    path = os.path.join(COOLDOWN_DIR, f"{coin}.json")
+    if not os.path.exists(path):
+        return False
+    with open(path, 'r') as f:
+        data = json.load(f)
+        last_time = datetime.datetime.fromisoformat(data.get("last_alert"))
+        return (datetime.datetime.now() - last_time).total_seconds() < 3600  # 1 uur
 
-def save_cooldowns(cooldowns):
-    with open(COOLDOWN_FILE, 'w') as f:
-        json.dump(cooldowns, f)
-
-def is_on_cooldown(coin, signal_type, cooldowns):
-    key = f"{coin}_{signal_type}"
-    if key in cooldowns:
-        last_trigger = datetime.datetime.fromisoformat(cooldowns[key])
-        return (datetime.datetime.now() - last_trigger).total_seconds() < COOLDOWN_MINUTES * 60
-    return False
-
-def update_cooldown(coin, signal_type, cooldowns):
-    key = f"{coin}_{signal_type}"
-    cooldowns[key] = datetime.datetime.now().isoformat()
+def update_cooldown(coin):
+    path = os.path.join(COOLDOWN_DIR, f"{coin}.json")
+    with open(path, 'w') as f:
+        json.dump({"last_alert": datetime.datetime.now().isoformat()}, f)
 
 # 🔁 MAIN LOOP
-any_trigger_sent = False
-change_24h_summary = {}
-cooldowns = load_cooldowns()
-
+btc_change_last_sent = 0
 for symbol, name in COINS.items():
     try:
         outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
@@ -72,11 +63,6 @@ for symbol, name in COINS.items():
         data = r.json()
 
         if "values" not in data:
-            msg = f"[ERROR] Geen data voor {name}: {data.get('message', 'Onbekende fout')}"
-            send_telegram_alert(msg)
-            extra = os.environ.get('EXTRA_CHAT_ID')
-            if extra:
-                send_telegram_alert(msg, chat_id=extra)
             continue
 
         df = pd.DataFrame(data["values"])
@@ -93,29 +79,46 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
-        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
-        change_24h_summary[name] = change_pct_24h
+        change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
+        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-3]) / df["close"].iloc[-3]) * 100 if len(df) >= 3 else 0.0
+        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100
 
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-        trend = "UP" if in_uptrend else "DOWN"
+        trend_icon = "🟢↑ UP" if in_uptrend else "🔴↓ DOWN"
 
-        if last_rsi < 30 and not is_on_cooldown(name, "strong_buy", cooldowns):
-            advice = "*STRONG BUY*\nSentiment: Oversold + Downtrend"
-            update_cooldown(name, "strong_buy", cooldowns)
-        elif last_rsi > 70 and not is_on_cooldown(name, "strong_sell", cooldowns):
-            advice = "*STRONG SELL*\nSentiment: Overbought + Uptrend"
-            update_cooldown(name, "strong_sell", cooldowns)
+        rsi_icon = "🟢" if last_rsi > 70 else "🔴" if last_rsi < 30 else "⚪"
+        rsi_label = f"{rsi_icon} RSI: {last_rsi:.2f} → {'Overbought' if last_rsi > 70 else 'Oversold' if last_rsi < 30 else 'Neutral'}"
+
+        one_hour_icon = "📈" if change_pct_1h > 0 else "📉"
+        change1h_label = f"🕒 1h Change: {one_hour_icon} {change_pct_1h:.2f}%"
+
+        change24_icon = "📈" if change_pct_24h > 0 else "📉"
+        change24_label = f"📅 24h Change: {change24_icon} {change_pct_24h:.2f}%"
+
+        if change_pct_1h > 3:
+            advice = "✅ *STRONG BUY*\nSentiment: Pump"
+        elif change_pct_1h < -3:
+            advice = "❌ *STRONG SELL*\nSentiment: Dump"
+        elif last_rsi < 25:
+            advice = "✅ *STRONG BUY*\nSentiment: Oversold + Downtrend"
+        elif last_rsi > 75:
+            advice = "❌ *STRONG SELL*\nSentiment: Overbought + Uptrend"
         else:
-            advice = "*NEUTRAL*"
+            advice = "NEUTRAL"
+
+        if advice == "NEUTRAL" or is_on_cooldown(name):
+            continue
+
+        update_cooldown(name)
 
         msg = (
-            f"*{name}*\n"
-            f"*RSI:* {last_rsi:.2f}\n"
-            f"*Change (1h):* {change_pct_1h:.2f}%\n"
-            f"*Change (24h):* {change_pct_24h:.2f}%\n"
-            f"*Trend:* {trend} (MA{MA_PERIOD})\n"
+            f"*{name}*
+"
+            f"{rsi_label}\n"
+            f"{change1h_label}\n"
+            f"{change24_label}\n"
+            f"*Trend:* {trend_icon} (MA{MA_PERIOD})\n"
             f"*Advice:* {advice}"
         )
 
@@ -137,35 +140,24 @@ for symbol, name in COINS.items():
         plt.savefig(image_path)
         plt.close()
 
-        if "NEUTRAL" not in advice:
-            any_trigger_sent = True
-            send_telegram_alert(msg)
-            send_telegram_chart(image_path)
-            extra = os.environ.get('EXTRA_CHAT_ID')
-            if extra:
-                send_telegram_alert(msg, chat_id=extra)
-                send_telegram_chart(image_path, chat_id=extra)
-
-    except Exception as e:
-        msg = f"[ERROR] Exception bij {name}: {str(e)}"
         send_telegram_alert(msg)
+        send_telegram_chart(image_path)
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
             send_telegram_alert(msg, chat_id=extra)
+            send_telegram_chart(image_path, chat_id=extra)
 
-save_cooldowns(cooldowns)
-
-# ⏱️ 24h Change Report for BTC Only (Every 2 Hours)
-now = datetime.datetime.now()
-if now.hour % 2 == 0:
-    try:
-        if "Bitcoin" in change_24h_summary:
-            pct = change_24h_summary["Bitcoin"]
-            color = "🟢" if pct >= 0 else "🔴"
-            message = f"24h BTC Change: {pct:+.2f}% {color}"
-            send_telegram_alert(message)
-            extra = os.environ.get('EXTRA_CHAT_ID')
+        if name == "Bitcoin" and abs(change_pct_24h) > BTC_OVERVIEW_THRESHOLD:
+            overview_msg = (
+                f"📊 *Bitcoin Overview*
+"
+                f"🕒 2h Change: {"📈" if change_pct_2h > 0 else "📉"} {change_pct_2h:.2f}%\n"
+                f"📅 24h Change: {change24_icon} {change_pct_24h:.2f}%\n"
+                f"{trend_icon}"
+            )
+            send_telegram_alert(overview_msg)
             if extra:
-                send_telegram_alert(message, chat_id=extra)
+                send_telegram_alert(overview_msg, chat_id=extra)
+
     except Exception as e:
-        print(f"Fout bij verzenden BTC 24h report: {e}")
+        send_telegram_alert(f"[ERROR] {name}: {str(e)}")
