@@ -142,17 +142,16 @@ for symbol, name in COINS.items():
         if extra:
             send_telegram_alert(msg, chat_id=extra)
 
-# 📅 Daily 24h change report (only if data is available)
+# ⏱️ 24h Change Report for BTC Only (Every 2 Hours)
 now = datetime.datetime.now()
-if now.hour == 10 and len(change_24h_summary) > 0:
+if now.hour % 2 == 0:
     try:
-        report = ["*24h Price Change Overview*"]
-        for name, pct in change_24h_summary.items():
-            report.append(f"- {name}: {pct:+.2f}%")
-        message = "\n".join(report)
-        send_telegram_alert(message)
-        extra = os.environ.get('EXTRA_CHAT_ID')
-        if extra:
-            send_telegram_alert(message, chat_id=extra)
+        if "Bitcoin" in change_24h_summary:
+            pct = change_24h_summary["Bitcoin"]
+            message = f"24h BTC Change: {pct:+.2f}%"
+            send_telegram_alert(message)
+            extra = os.environ.get('EXTRA_CHAT_ID')
+            if extra:
+                send_telegram_alert(message, chat_id=extra)
     except Exception as e:
-        print(f"Fout bij verzenden daily 24h change report: {e}")
+        print(f"Fout bij verzenden BTC 24h report: {e}")
