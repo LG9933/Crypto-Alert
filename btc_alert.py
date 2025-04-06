@@ -56,6 +56,7 @@ for symbol, name in COINS.items():
         df = pd.DataFrame(data["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df["close"] = df["close"].astype(float)
+        df["volume"] = df["volume"].astype(float)
         df = df[::-1].reset_index(drop=True)
 
         # RSI berekening
@@ -68,10 +69,13 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        # % change 2h en 24h
-        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
+        # % change 1h en 24h
+        change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
         change_24h_summary[name] = change_pct_24h
+
+        last_volume = df["volume"].iloc[-1]
+        volume_ma = df["volume"].rolling(window=MA_PERIOD).mean().iloc[-1]
 
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
@@ -79,10 +83,10 @@ for symbol, name in COINS.items():
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
         # 📈 Momentum + RSI + Trend based advies
-        if change_pct_2h > 3:
-            advice = "*STRONG BUY 🚀*\nSentiment: _Bullish 📈_"
-        elif change_pct_2h < -3:
-            advice = "*STRONG SELL 💥*\nSentiment: _Bearish 📉_"
+        if change_pct_1h > 3 and last_volume > volume_ma:
+            advice = "*STRONG BUY 🚀*\nSentiment: _Bullish + Volume Spike 📈_"
+        elif change_pct_1h < -3 and last_volume > volume_ma:
+            advice = "*STRONG SELL 💥*\nSentiment: _Bearish + Volume Spike 📉_"
         elif last_rsi < 30 and in_uptrend:
             advice = "*BUY 🟢*\nSentiment: _Oversold + Uptrend_"
         elif last_rsi < 30 and not in_uptrend:
@@ -98,9 +102,10 @@ for symbol, name in COINS.items():
         msg = (
             f"*{name}*\n"
             f"*RSI:* {last_rsi:.2f}\n"
-            f"*Change (2h):* {change_pct_2h:.2f}%\n"
+            f"*Change (1h):* {change_pct_1h:.2f}%\n"
             f"*Change (24h):* {change_pct_24h:.2f}%\n"
             f"*Trend:* {trend} (MA{MA_PERIOD})\n"
+            f"*Volume:* {last_volume:.0f} vs MA: {volume_ma:.0f}\n"
             f"*Advice:* {advice}"
         )
 
