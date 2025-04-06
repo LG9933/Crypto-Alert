@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import datetime
+import json
 
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
@@ -14,6 +15,7 @@ COINS = {
 INTERVAL = "1h"
 RSI_PERIOD = 14
 MA_PERIOD = 50
+COOLDOWN_FILE = "/tmp/alert_cooldowns.json"
 
 # ✅ TELEGRAM
 def send_telegram_alert(message, chat_id=None):
@@ -34,8 +36,22 @@ def send_telegram_chart(image_path, chat_id=None):
         data = {"chat_id": final_chat_id}
         requests.post(url, files=files, data=data)
 
+# 🔁 COOLDOWN LOGIC
+def load_cooldowns():
+    if os.path.exists(COOLDOWN_FILE):
+        with open(COOLDOWN_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_cooldowns(cooldowns):
+    with open(COOLDOWN_FILE, 'w') as f:
+        json.dump(cooldowns, f)
+
+cooldowns = load_cooldowns()
+now = datetime.datetime.now()
+timestamp_now = now.timestamp()
+
 # 🔁 MAIN LOOP
-any_trigger_sent = False
 change_24h_summary = {}
 change_2h_summary = {}
 trend_map = {}
@@ -48,11 +64,6 @@ for symbol, name in COINS.items():
         data = r.json()
 
         if "values" not in data:
-            msg = f"[ERROR] Geen data voor {name}: {data.get('message', 'Onbekende fout')}"
-            send_telegram_alert(msg)
-            extra = os.environ.get('EXTRA_CHAT_ID')
-            if extra:
-                send_telegram_alert(msg, chat_id=extra)
             continue
 
         df = pd.DataFrame(data["values"])
@@ -109,35 +120,48 @@ for symbol, name in COINS.items():
         else:
             advice = "*NEUTRAL*"
 
-        msg = (
-            f"*{name}*\n"
-            f"{rsi_label}\n"
-            f"⏱ *1h Change:* {ch1h_emoji} {change_pct_1h:.2f}%\n"
-            f"📆 *24h Change:* {ch24h_emoji} {change_pct_24h:.2f}%\n"
-            f"{trend_emoji} *Trend:* {trend} (MA{MA_PERIOD})\n"
-            f"{advice}"
-        )
+        # Cooldown check
+        cooldown_key = f"{name}_{advice}"
+        cooldown_ok = True
+        if advice != "*NEUTRAL*":
+            last_alert_time = cooldowns.get(cooldown_key, 0)
+            time_since = timestamp_now - last_alert_time
+            if time_since < 7200:  # 2 uur cooldown
+                # uitzonderingen toestaan bij sterke extra beweging
+                if (abs(change_pct_1h) > 6 or last_rsi < 20 or last_rsi > 80):
+                    cooldown_ok = True
+                else:
+                    cooldown_ok = False
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-        ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
-        ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
-        ax1.set_title(f"{name} Price + MA{MA_PERIOD}")
-        ax1.legend()
+        # Bericht opstellen en versturen
+        if advice != "*NEUTRAL*" and cooldown_ok:
+            msg = (
+                f"*{name}*\n"
+                f"{rsi_label}\n"
+                f"⏱ *1h Change:* {ch1h_emoji} {change_pct_1h:.2f}%\n"
+                f"📆 *24h Change:* {ch24h_emoji} {change_pct_24h:.2f}%\n"
+                f"{trend_emoji} *Trend:* {trend} (MA{MA_PERIOD})\n"
+                f"{advice}"
+            )
 
-        ax2.plot(df["datetime"], rsi, label="RSI", color="purple")
-        ax2.axhline(70, color="red", linestyle="--", linewidth=0.8)
-        ax2.axhline(30, color="green", linestyle="--", linewidth=0.8)
-        ax2.set_title("RSI")
-        ax2.set_ylim(0, 100)
-        ax2.legend()
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+            ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
+            ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
+            ax1.set_title(f"{name} Price + MA{MA_PERIOD}")
+            ax1.legend()
 
-        plt.tight_layout()
-        image_path = f"/tmp/chart_{symbol.replace('/', '_')}.png"
-        plt.savefig(image_path)
-        plt.close()
+            ax2.plot(df["datetime"], rsi, label="RSI", color="purple")
+            ax2.axhline(70, color="red", linestyle="--", linewidth=0.8)
+            ax2.axhline(30, color="green", linestyle="--", linewidth=0.8)
+            ax2.set_title("RSI")
+            ax2.set_ylim(0, 100)
+            ax2.legend()
 
-        if "NEUTRAL" not in advice:
-            any_trigger_sent = True
+            plt.tight_layout()
+            image_path = f"/tmp/chart_{symbol.replace('/', '_')}.png"
+            plt.savefig(image_path)
+            plt.close()
+
             send_telegram_alert(msg)
             send_telegram_chart(image_path)
             extra = os.environ.get('EXTRA_CHAT_ID')
@@ -145,15 +169,12 @@ for symbol, name in COINS.items():
                 send_telegram_alert(msg, chat_id=extra)
                 send_telegram_chart(image_path, chat_id=extra)
 
+            cooldowns[cooldown_key] = timestamp_now
+
     except Exception as e:
-        msg = f"[ERROR] Exception bij {name}: {str(e)}"
-        send_telegram_alert(msg)
-        extra = os.environ.get('EXTRA_CHAT_ID')
-        if extra:
-            send_telegram_alert(msg, chat_id=extra)
+        print(f"[ERROR] Exception bij {name}: {str(e)}")
 
 # ⏱️ 2-uur Bitcoin update met kleur en trend
-now = datetime.datetime.now()
 if now.hour % 2 == 0:
     try:
         if "Bitcoin" in change_2h_summary and "Bitcoin" in change_24h_summary:
@@ -174,3 +195,6 @@ if now.hour % 2 == 0:
                 send_telegram_alert(msg, chat_id=extra)
     except Exception as e:
         print(f"Fout bij verzenden BTC 2h report: {e}")
+
+# 💾 Save cooldowns
+save_cooldowns(cooldowns)
