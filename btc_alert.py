@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import datetime
 import json
 
-# 🧠 CONFIG
+# CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
     "BTC/USD": "Bitcoin",
@@ -16,9 +16,10 @@ INTERVAL = "1h"
 RSI_PERIOD = 14
 MA_PERIOD = 50
 COOLDOWN_DIR = ".cooldowns"
-BTC_OVERVIEW_THRESHOLD = 2.5  # 24h change trigger threshold
+COOLDOWN_MINUTES = 60
 
-# ✅ TELEGRAM
+# TELEGRAM
+
 def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
     default_chat_id = os.environ['CHAT_ID']
@@ -37,26 +38,30 @@ def send_telegram_chart(image_path, chat_id=None):
         data = {"chat_id": final_chat_id}
         requests.post(url, files=files, data=data)
 
-# 🕒 Cooldown check
-os.makedirs(COOLDOWN_DIR, exist_ok=True)
-def is_on_cooldown(coin):
-    path = os.path.join(COOLDOWN_DIR, f"{coin}.json")
+def in_cooldown(symbol):
+    if not os.path.exists(COOLDOWN_DIR):
+        os.makedirs(COOLDOWN_DIR)
+    path = os.path.join(COOLDOWN_DIR, f"{symbol.replace('/', '_')}.json")
     if not os.path.exists(path):
         return False
     with open(path, 'r') as f:
-        data = json.load(f)
-        last_time = datetime.datetime.fromisoformat(data.get("last_alert"))
-        return (datetime.datetime.now() - last_time).total_seconds() < 3600  # 1 uur
+        last_alert = json.load(f).get("timestamp")
+        if not last_alert:
+            return False
+        last_time = datetime.datetime.fromisoformat(last_alert)
+        return (datetime.datetime.now() - last_time).total_seconds() < COOLDOWN_MINUTES * 60
 
-def update_cooldown(coin):
-    path = os.path.join(COOLDOWN_DIR, f"{coin}.json")
+def update_cooldown(symbol):
+    path = os.path.join(COOLDOWN_DIR, f"{symbol.replace('/', '_')}.json")
     with open(path, 'w') as f:
-        json.dump({"last_alert": datetime.datetime.now().isoformat()}, f)
+        json.dump({"timestamp": datetime.datetime.now().isoformat()}, f)
 
-# 🔁 MAIN LOOP
-btc_change_last_sent = 0
+# MAIN
 for symbol, name in COINS.items():
     try:
+        if in_cooldown(symbol):
+            continue
+
         outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
         r = requests.get(url)
@@ -79,47 +84,32 @@ for symbol, name in COINS.items():
         rsi = 100 - (100 / (1 + rs))
         last_rsi = rsi.iloc[-1]
 
-        change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100
-        change_pct_2h = ((df["close"].iloc[-1] - df["close"].iloc[-3]) / df["close"].iloc[-3]) * 100 if len(df) >= 3 else 0.0
-        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100
+        change_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
+        change_2h = ((df["close"].iloc[-1] - df["close"].iloc[-3]) / df["close"].iloc[-3]) * 100 if len(df) >= 3 else 0.0
+        change_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
 
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
-        trend_icon = "🟢↑ UP" if in_uptrend else "🔴↓ DOWN"
+        trend = "🟢 UP" if in_uptrend else "🔴 DOWN"
 
-        rsi_icon = "🟢" if last_rsi > 70 else "🔴" if last_rsi < 30 else "⚪"
-        rsi_label = f"{rsi_icon} RSI: {last_rsi:.2f} → {'Overbought' if last_rsi > 70 else 'Oversold' if last_rsi < 30 else 'Neutral'}"
-
-        one_hour_icon = "📈" if change_pct_1h > 0 else "📉"
-        change1h_label = f"🕒 1h Change: {one_hour_icon} {change_pct_1h:.2f}%"
-
-        change24_icon = "📈" if change_pct_24h > 0 else "📉"
-        change24_label = f"📅 24h Change: {change24_icon} {change_pct_24h:.2f}%"
-
-        if change_pct_1h > 3:
-            advice = "✅ *STRONG BUY*\nSentiment: Pump"
-        elif change_pct_1h < -3:
-            advice = "❌ *STRONG SELL*\nSentiment: Dump"
-        elif last_rsi < 25:
-            advice = "✅ *STRONG BUY*\nSentiment: Oversold + Downtrend"
-        elif last_rsi > 75:
-            advice = "❌ *STRONG SELL*\nSentiment: Overbought + Uptrend"
+        if change_1h > 3:
+            advice = "*STRONG BUY*\nSentiment: Pump + Momentum"
+        elif change_1h < -3:
+            advice = "*STRONG SELL*\nSentiment: Dump + Momentum"
+        elif last_rsi < 30 and not in_uptrend:
+            advice = "*STRONG BUY*\nSentiment: Oversold + Downtrend"
+        elif last_rsi > 70 and not in_uptrend:
+            advice = "*STRONG SELL*\nSentiment: Overbought + Downtrend"
         else:
-            advice = "NEUTRAL"
-
-        if advice == "NEUTRAL" or is_on_cooldown(name):
-            continue
-
-        update_cooldown(name)
+            continue  # skip alerts that are not strong
 
         msg = (
-            f"*{name}*
-"
-            f"{rsi_label}\n"
-            f"{change1h_label}\n"
-            f"{change24_label}\n"
-            f"*Trend:* {trend_icon} (MA{MA_PERIOD})\n"
-            f"*Advice:* {advice}"
+            f"📊 *{name}*\n"
+            f"🔻 *RSI:* {last_rsi:.2f} → _{'Oversold' if last_rsi < 30 else 'Overbought'}_\n"
+            f"🕒 *1h Change:* {'📈' if change_1h > 0 else '📉'} {change_1h:.2f}%\n"
+            f"📅 *24h Change:* {'📈' if change_24h > 0 else '📉'} {change_24h:.2f}%\n"
+            f"📉 *Trend:* {trend} (MA{MA_PERIOD})\n"
+            f"{advice}"
         )
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
@@ -147,17 +137,11 @@ for symbol, name in COINS.items():
             send_telegram_alert(msg, chat_id=extra)
             send_telegram_chart(image_path, chat_id=extra)
 
-        if name == "Bitcoin" and abs(change_pct_24h) > BTC_OVERVIEW_THRESHOLD:
-            overview_msg = (
-                f"📊 *Bitcoin Overview*
-"
-                f"🕒 2h Change: {"📈" if change_pct_2h > 0 else "📉"} {change_pct_2h:.2f}%\n"
-                f"📅 24h Change: {change24_icon} {change_pct_24h:.2f}%\n"
-                f"{trend_icon}"
-            )
-            send_telegram_alert(overview_msg)
-            if extra:
-                send_telegram_alert(overview_msg, chat_id=extra)
+        update_cooldown(symbol)
 
     except Exception as e:
-        send_telegram_alert(f"[ERROR] {name}: {str(e)}")
+        msg = f"[ERROR] Exception bij {name}: {str(e)}"
+        send_telegram_alert(msg)
+        extra = os.environ.get('EXTRA_CHAT_ID')
+        if extra:
+            send_telegram_alert(msg, chat_id=extra)
