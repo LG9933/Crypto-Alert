@@ -76,20 +76,23 @@ for symbol, name in COINS.items():
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
+        trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
-        # Advies op basis van RSI en MA
-        if last_rsi < 30 and in_uptrend:
-            advice = "*BUY 🟢*"
+        # 📈 Momentum + RSI + Trend based advies
+        if change_pct_2h > 3:
+            advice = "*STRONG BUY 🚀*\nSentiment: _Bullish 📈_"
+        elif change_pct_2h < -3:
+            advice = "*STRONG SELL 💥*\nSentiment: _Bearish 📉_"
+        elif last_rsi < 30 and in_uptrend:
+            advice = "*BUY 🟢*\nSentiment: _Oversold + Uptrend_"
         elif last_rsi < 30 and not in_uptrend:
-            advice = "*STRONG BUY ✅*"
+            advice = "*STRONG BUY ✅*\nSentiment: _Oversold + Downtrend_"
         elif last_rsi > 70 and not in_uptrend:
-            advice = "*SELL 🔴*"
+            advice = "*STRONG SELL ❌*\nSentiment: _Overbought + Downtrend_"
         elif last_rsi > 70 and in_uptrend:
-            advice = "*STRONG SELL ❌*"
+            advice = "*SELL 🔴*\nSentiment: _Overbought + Uptrend_"
         else:
             advice = "*NEUTRAL ⚪*"
-
-        trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
         # Bericht opstellen
         msg = (
@@ -101,19 +104,7 @@ for symbol, name in COINS.items():
             f"*Advice:* {advice}"
         )
 
-        # Alleen versturen als niet neutraal
-        if "NEUTRAL" not in advice:
-            any_trigger_sent = True
-            send_telegram_alert(msg)
-            image_path = f"/tmp/chart_{symbol.replace('/', '_')}.png"
-            send_telegram_chart(image_path)
-
-            extra = os.environ.get('EXTRA_CHAT_ID')
-            if extra:
-                send_telegram_alert(msg, chat_id=extra)
-                send_telegram_chart(image_path, chat_id=extra)
-
-        # Grafiek maken
+        # Grafiek maken vóór versturen
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
         ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
         ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
@@ -132,6 +123,15 @@ for symbol, name in COINS.items():
         plt.savefig(image_path)
         plt.close()
 
+        if "NEUTRAL" not in advice:
+            any_trigger_sent = True
+            send_telegram_alert(msg)
+            send_telegram_chart(image_path)
+            extra = os.environ.get('EXTRA_CHAT_ID')
+            if extra:
+                send_telegram_alert(msg, chat_id=extra)
+                send_telegram_chart(image_path, chat_id=extra)
+
     except Exception as e:
         msg = f"[ERROR] Exception bij {name}: {str(e)}"
         send_telegram_alert(msg)
@@ -146,9 +146,10 @@ if now.hour == 10:
         report = ["📊 *24h Price Change Overview*"]
         for name, pct in change_24h_summary.items():
             report.append(f"- {name}: {pct:+.2f}%")
-        send_telegram_alert("\n".join(report))
+        message = "\n".join(report)
+        send_telegram_alert(message)
         extra = os.environ.get('EXTRA_CHAT_ID')
         if extra:
-            send_telegram_alert("\n".join(report), chat_id=extra)
+            send_telegram_alert(message, chat_id=extra)
     except Exception as e:
         print(f"Fout bij verzenden daily 24h change report: {e}")
