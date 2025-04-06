@@ -1,56 +1,85 @@
 # Crypto RSI Alert Bot
 
-Automated RSI, MACD, and Bollinger Bands analysis for cryptocurrencies (BTC, SOL, LINK) with Telegram alerts, chart generation, and scheduled GitHub Actions runs.
+A fully automated Python script that analyzes price action and technical indicators (RSI, MA50, price change %, volume) for multiple cryptocurrencies and sends real-time alerts to Telegram. Built for traders who want to catch strong market moves without noise.
+
+---
 
 ## Features
-- Runs every hour via GitHub Actions
-- RSI calculation (14 periods, 1h interval)
-- MACD and Signal line comparison
-- Bollinger Bands analysis (Upper / Lower band triggers)
-- % price change over the last 2h and 24h
-- MA50 trend detection
-- Alerts only sent when at least one indicator is in a strong zone (RSI/MACD/BB)
-- Markdown-styled alerts with sentiment labels and emoji
-- Chart with price and RSI sent as Telegram image
 
-## Example Alert (via Telegram)
+- Supports Bitcoin (BTC), Solana (SOL), and Chainlink (LINK)
+- Runs every **30 minutes** using GitHub Actions
+- Checks:
+  - 1h price change % (detect pump/dump)
+  - 24h price change % (daily overview)
+  - RSI (overbought / oversold)
+  - MA50 (trend)
+  - Volume spikes (confirmation)
+- Sends alerts via **Telegram bot** with Markdown formatting and price charts
+- Only triggers on actionable advice (BUY, SELL, STRONG BUY/SELL)
+- Sends daily price overview at **10:00 AM**
+
+---
+
+## Requirements
+
+- GitHub account with GitHub Actions enabled
+- Telegram bot 
+- Secrets configured:
+  - `TWELVE_API_KEY`: API key from https://twelvedata.com
+  - `BOT_TOKEN`: Your Telegram bot token
+  - `CHAT_ID`: Your main Telegram user ID
+  - *(Optional)* `EXTRA_CHAT_ID`: For second person to receive alerts
+
+---
+
+## How it works
+
+1. GitHub Actions runs the script every 30 minutes
+2. For each coin:
+   - Downloads historical price + volume data from Twelve Data
+   - Calculates RSI, MA50, price changes, and volume average
+   - If strong price movement + volume spike → triggers STRONG BUY/SELL
+   - If RSI/MA suggest a setup → triggers BUY/SELL fallback
+3. Sends an alert to Telegram including:
+   - Indicator values
+   - Market sentiment
+   - Advice + chart image
+
+4. At 10:00 AM, sends daily change report even if no alerts triggered
+
+---
+
+## Example Alert
 ```
 *Bitcoin*
-*RSI:* 28.31 → _Bullish 🟢_
-*MACD:* 0.0154 vs -0.0021 → _Bullish 🟢_
-*BBANDS:* 66400.32 < lower → _Bullish 🟢_
-*Advice:* *STRONG BUY ✅*
-*Change (2h):* -3.91%
-*Change (24h):* -7.32%
-*Trend:* ↓ DOWN (MA50)
+*RSI:* 72.15
+*Change (1h):* +3.57%
+*Change (24h):* +6.03%
+*Trend:* UP (MA50)
+*Volume:* 20500 vs MA: 12300
+*Advice:* STRONG SELL
+Sentiment: Bearish + Volume Spike
 ```
 
-## Required (GitHub Secrets)
-- `BOT_TOKEN`: Telegram bot token
-- `CHAT_ID`: Personal chat ID
-- `EXTRA_CHAT_ID`: (optional) ID of additional recipient
-- `TWELVE_API_KEY`: API calls for prices
+---
 
-## Coins
-Default: BTC/USD, SOL/USD, LINK/USD
-Easily extendable in the `COINS = {}` section in `btc_alert.py`
+## Customize
+- Change alert thresholds in the `btc_alert.py` logic
+- Add more coins to the `COINS` dictionary
+- Adjust `MA_PERIOD` or `RSI_PERIOD` for different strategies
 
-## Example Alert (via Telegram)
-```
-*Bitcoin*
-*RSI:* 28.31 → _Bullish 🟢_
-*MACD:* 0.0154 vs -0.0021 → _Bullish 🟢_
-*BBANDS:* 66400.32 < lower → _Bullish 🟢_
-*Advice:* *STRONG BUY ✅*
-*Change (2h):* -3.91%
-*Change (24h):* -7.32%
-*Trend:* ↓ DOWN (MA50)
-```
+---
 
-Includes a visual chart with price and RSI.
+## Testing
+You can manually run the script via GitHub Actions → "Run workflow". If no alerts are triggered, it will remain silent (except 10:00 daily update).
 
-## Disclaimer
-This project contains no API keys or tokens. Everything is securely handled via GitHub Secrets. Use only with your own API credentials.
+---
 
-## Author
-Robin A. — 2025
+## Security
+This repo uses GitHub Secrets for all credentials. Never commit your API key or bot token directly.
+
+---
+
+## License
+MIT — free to use, modify and share.
+Robin A. 2025
