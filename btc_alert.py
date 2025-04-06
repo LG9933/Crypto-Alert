@@ -56,8 +56,16 @@ for symbol, name in COINS.items():
         df = pd.DataFrame(data["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
         df = df[::-1].reset_index(drop=True)
+
+        # Volume toevoegen als beschikbaar
+        if "volume" in df.columns:
+            df["volume"] = df["volume"].astype(float)
+            last_volume = df["volume"].iloc[-1]
+            volume_ma = df["volume"].rolling(window=MA_PERIOD).mean().iloc[-1]
+        else:
+            last_volume = 0
+            volume_ma = 0
 
         # RSI berekening
         delta = df["close"].diff()
@@ -74,18 +82,15 @@ for symbol, name in COINS.items():
         change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
         change_24h_summary[name] = change_pct_24h
 
-        last_volume = df["volume"].iloc[-1]
-        volume_ma = df["volume"].rolling(window=MA_PERIOD).mean().iloc[-1]
-
         # MA50 berekenen
         df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
         in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
         trend = "↑ UP" if in_uptrend else "↓ DOWN"
 
         # 📈 Momentum + RSI + Trend based advies
-        if change_pct_1h > 3 and last_volume > volume_ma:
+        if change_pct_1h > 3 and last_volume > 0 and last_volume > volume_ma:
             advice = "*STRONG BUY 🚀*\nSentiment: _Bullish + Volume Spike 📈_"
-        elif change_pct_1h < -3 and last_volume > volume_ma:
+        elif change_pct_1h < -3 and last_volume > 0 and last_volume > volume_ma:
             advice = "*STRONG SELL 💥*\nSentiment: _Bearish + Volume Spike 📉_"
         elif last_rsi < 30 and in_uptrend:
             advice = "*BUY 🟢*\nSentiment: _Oversold + Uptrend_"
