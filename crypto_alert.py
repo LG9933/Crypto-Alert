@@ -15,16 +15,16 @@ import sys
 manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 
 # 🧠 CONFIG
-API_KEY            = os.environ['TWELVE_API_KEY']
+API_KEY        = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": {"name": "Bitcoin",  "threshold": 1.5},
-    "SOL/USD": {"name": "Solana",   "threshold": 2.5},
+    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.5},
+    "SOL/USD": {"name": "Solana",    "threshold": 2.5},
     "LINK/USD":{"name": "Chainlink","threshold": 2.5}
 }
-INTERVAL           = "30min"
-OUTPUTSIZE         = 6   # 5 + 1 voor mini-grafiek
-ATR_PERIOD         = 14  # aantal candles voor ATR
-ATR_MULTIPLIER     = 1.2 # True Range ≥ 1.2×ATR → volatility spike
+INTERVAL       = "30min"
+OUTPUTSIZE     = 6    # 5 + 1 voor mini-grafiek
+ATR_PERIOD     = 14   # candles voor ATR
+ATR_MULTIPLIER = 1.2  # TR ≥ 1.2×ATR → volatility spike
 
 # ✅ TELEGRAM HELPERS
 def send_telegram_alert(message, chat_id=None):
@@ -42,7 +42,7 @@ def send_telegram_chart(image_path, chat_id=None):
     cid   = chat_id or os.environ['CHAT_ID']
     url   = f"https://api.telegram.org/bot{token}/sendPhoto"
     with open(image_path, 'rb') as photo:
-        requests.post(url, files={"photo":photo}, data={"chat_id":cid})
+        requests.post(url, files={"photo": photo}, data={"chat_id": cid})
 
 # Zorg dat /tmp bestaat
 Path("/tmp").mkdir(parents=True, exist_ok=True)
@@ -72,13 +72,13 @@ def fetch_atr(symbol):
 
 # ── TEST‑RUN MODE ──
 if manual_run:
-    lines = []
     ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+    lines = [f"🧪 *Test Run* {ts}"]
     for symbol, info in COINS.items():
-        # 1) time_series
+        # 1) Time series
         ts_data = fetch_time_series(symbol)
         if "values" not in ts_data:
-            lines.append(f"*{info['name']}* – ❌ geen TS-data")
+            lines.append(f"*{info['name']}* – ❌ geen price data")
             continue
 
         df = pd.DataFrame(ts_data["values"])
@@ -90,34 +90,34 @@ if manual_run:
         curr = df["close"].iloc[-1]
         prev = df["close"].iloc[-2]
         pct  = (curr - prev) / prev * 100
+        arrow = "📈" if pct > 0 else "📉"
+        word  = "Pump" if pct > 0 else "Dump"
 
         # 2) ATR
         atr_data = fetch_atr(symbol)
-        if "values" in atr_data:
-            atr_val     = float(atr_data["values"][-1]["ATR"])
-            true_range  = df["high"].iloc[-1] - df["low"].iloc[-1]
-            spike_flag  = true_range >= atr_val * ATR_MULTIPLIER
-            atr_line    = (
-                f"⚡ ATR {atr_val:.2f}, TR {true_range:.2f}"
-                + (" ✅ spike" if spike_flag else "")
-            )
+        atr_val = None
+        if "values" in atr_data and atr_data["values"]:
+            last = atr_data["values"][-1]
+            atr_str = last.get("ATR") or last.get("atr")
+            try:
+                atr_val = float(atr_str) if atr_str is not None else None
+            except:
+                atr_val = None
+        if atr_val is not None:
+            true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
+            spike = true_range >= atr_val * ATR_MULTIPLIER
+            atr_line = f"⚡ ATR {atr_val:.2f}, TR {true_range:.2f}" + (" ✅ spike" if spike else "")
         else:
-            atr_line = "⚡ ATR‑data niet beschikbaar"
+            atr_line = "⚡ ATR data niet beschikbaar"
 
-        # 3) Arrow + label
-        arrow = "📈" if pct > 0 else "📉"
-        word  = "Pump" if pct > 0 else "Dump"
-        lines.append(
-            f"{arrow} *{info['name']} {word}* {pct:+.2f}%\n{atr_line}"
-        )
+        lines.append(f"{arrow} *{info['name']} {word}* {pct:+.2f}%\n{atr_line}")
 
-    send_telegram_alert(f"🧪 *Test Run* {ts}\n" + "\n\n".join(lines))
+    send_telegram_alert("\n\n".join(lines))
     sys.exit()
 
 # ── NORMAL ALERT MODE (cron) ──
 for symbol, info in COINS.items():
     try:
-        # 1) time_series
         ts_data = fetch_time_series(symbol)
         if "values" not in ts_data:
             continue
@@ -135,16 +135,23 @@ for symbol, info in COINS.items():
 
         alerts = []
 
-        # 2) Price threshold
+        # 1) Price threshold check
         if abs(pct) >= info["threshold"]:
             arrow = "📈" if pct > 0 else "📉"
             word  = "Pump" if pct > 0 else "Dump"
             alerts.append(f"{arrow} *{info['name']} {word}!* {pct:+.2f}%")
 
-        # 3) ATR‑based volatility spike
+        # 2) ATR‑based volatility spike
         atr_data = fetch_atr(symbol)
-        if "values" in atr_data:
-            atr_val    = float(atr_data["values"][-1]["ATR"])
+        atr_val = None
+        if "values" in atr_data and atr_data["values"]:
+            last = atr_data["values"][-1]
+            atr_str = last.get("ATR") or last.get("atr")
+            try:
+                atr_val = float(atr_str) if atr_str is not None else None
+            except:
+                atr_val = None
+        if atr_val is not None:
             true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
             if true_range >= atr_val * ATR_MULTIPLIER:
                 alerts.append(
@@ -152,7 +159,7 @@ for symbol, info in COINS.items():
                     f"{ATR_MULTIPLIER}×ATR({atr_val:.2f})"
                 )
 
-        # 4) Send alerts + mini‑chart
+        # 3) Send alerts + mini‑chart
         if alerts:
             ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
             send_telegram_alert(f"🕒 *{ts}*\n" + "\n".join(alerts))
