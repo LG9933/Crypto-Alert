@@ -1,144 +1,113 @@
+# ============================================
+#   Crypto-Alert Bot
+#   Crafted with ❤️ by Robin A
+# ============================================
+
 import requests
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
-import datetime
 from pathlib import Path
+from datetime import datetime
 
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": "Bitcoin",
-    "SOL/USD": "Solana",
-    "LINK/USD": "Chainlink"
+    "BTC/USD": {"name": "Bitcoin",  "threshold": 1.5},
+    "SOL/USD": {"name": "Solana",   "threshold": 2.5},
+    "LINK/USD":{"name": "Chainlink","threshold": 2.5}
 }
-INTERVAL = "1h"
-RSI_PERIOD = 14
-MA_PERIOD = 50
+INTERVAL = "30min"
+OUTPUTSIZE = 6  # 5 + 1 voor volume-berekening
+VOLUME_SPIKE_MULTIPLIER = 1.5  # huidige > 1.5× gemiddeld van 5 candles
 
-# ✅ TELEGRAM
+# ✅ TELEGRAM HELPERS
 def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
-    default_chat_id = os.environ['CHAT_ID']
-    final_chat_id = chat_id if chat_id else default_chat_id
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": final_chat_id, "text": message, "parse_mode": "Markdown"}
+    cid   = chat_id or os.environ['CHAT_ID']
+    url   = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": cid,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     requests.post(url, data=payload)
 
 def send_telegram_chart(image_path, chat_id=None):
     token = os.environ['BOT_TOKEN']
-    default_chat_id = os.environ['CHAT_ID']
-    final_chat_id = chat_id if chat_id else default_chat_id
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    cid   = chat_id or os.environ['CHAT_ID']
+    url   = f"https://api.telegram.org/bot{token}/sendPhoto"
     with open(image_path, 'rb') as photo:
         files = {"photo": photo}
-        data = {"chat_id": final_chat_id}
+        data  = {"chat_id": cid}
         requests.post(url, files=files, data=data)
 
-# 🔁 MAIN LOOP
-now = datetime.datetime.now()
-change_24h_summary = {}
+# Zorg dat /tmp bestaat
+Path("/tmp").mkdir(parents=True, exist_ok=True)
 
-for symbol, name in COINS.items():
+# 🔁 MAIN LOOP (run via cron elke 30m)
+for symbol, info in COINS.items():
     try:
-        outputsize = max(RSI_PERIOD, MA_PERIOD, 25)
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={INTERVAL}&outputsize={outputsize}&apikey={API_KEY}"
-        r = requests.get(url)
-        data = r.json()
-
-        if "values" not in data:
+        # 1) Data ophalen
+        url = (
+            f"https://api.twelvedata.com/time_series"
+            f"?symbol={symbol}&interval={INTERVAL}"
+            f"&outputsize={OUTPUTSIZE}&apikey={API_KEY}"
+        )
+        resp = requests.get(url).json()
+        if "values" not in resp:
             continue
 
-        df = pd.DataFrame(data["values"])
+        df = pd.DataFrame(resp["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
-        df["close"] = df["close"].astype(float)
-        df = df[::-1].reset_index(drop=True)
+        df["close"]    = df["close"].astype(float)
+        df["volume"]   = df["volume"].astype(float)
+        df = df.iloc[::-1].reset_index(drop=True)  # chronologisch
 
-        delta = df["close"].diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-        avg_gain = gain.rolling(window=RSI_PERIOD).mean()
-        avg_loss = loss.rolling(window=RSI_PERIOD).mean()
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-        last_rsi = rsi.iloc[-1]
+        # 2) Bereken prijsverandering laatste candle
+        current_close  = df["close"].iloc[-1]
+        previous_close = df["close"].iloc[-2]
+        pct_change     = (current_close - previous_close) / previous_close * 100
 
-        change_pct_1h = ((df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2]) * 100 if len(df) >= 2 else 0.0
-        change_pct_24h = ((df["close"].iloc[-1] - df["close"].iloc[-25]) / df["close"].iloc[-25]) * 100 if len(df) >= 25 else 0.0
-        df["ma"] = df["close"].rolling(window=MA_PERIOD).mean()
-        in_uptrend = df["close"].iloc[-1] > df["ma"].iloc[-1]
+        # 3) Bereken volume spike
+        vols           = df["volume"].iloc[-6:-1]  # 5 candles vóór de huidige
+        avg_vol        = vols.mean()
+        current_vol    = df["volume"].iloc[-1]
+        spike          = current_vol > avg_vol * VOLUME_SPIKE_MULTIPLIER
 
-        rsi_icon = "🔻" if last_rsi < 30 else "🔺" if last_rsi > 70 else ""  # Neutraal geen icoon
-        trend_icon = "📊 UP" if in_uptrend else "📊 DOWN"
-        one_hour_icon = "📈" if change_pct_1h > 0 else "📉"
-        day_icon = "📅📈" if change_pct_24h > 0 else "📅📉"
-
-        image_path = f"/tmp/chart_{symbol.replace('/', '_')}.png"
-
-        if name == "Bitcoin":
-            # RSI-based advice
-            if last_rsi < 30 and not in_uptrend:
-                advice = "STRONG BUY"
-                sentiment = "Oversold + Downtrend"
-            elif last_rsi > 70 and in_uptrend:
-                advice = "STRONG SELL"
-                sentiment = "Overbought + Uptrend"
-            else:
-                advice = "NEUTRAL"
-                sentiment = ""
-
-            # Bericht en grafiek
-            if advice != "NEUTRAL":
-                msg = (
-                    f"{rsi_icon} *{name}*\n"
-                    f"RSI: {last_rsi:.2f} → *{sentiment.split()[0]}*\n"
-                    f"🕒 1h Change: {one_hour_icon} {change_pct_1h:.2f}%\n"
-                    f"📅 24h Change: {day_icon} {change_pct_24h:.2f}%\n"
-                    f"{trend_icon} (MA{MA_PERIOD})\n"
-                    f"*{advice}*\nSentiment: {sentiment}"
-                )
-
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8,6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-                ax1.plot(df["datetime"], df["close"], label="Close", linewidth=1.5)
-                ax1.plot(df["datetime"], df["ma"], label=f"MA{MA_PERIOD}", linestyle="--")
-                ax1.set_title(f"{name} Price + MA{MA_PERIOD}")
-                ax1.legend()
-
-                ax2.plot(df["datetime"], rsi, label="RSI", color="purple")
-                ax2.axhline(70, color="red", linestyle="--", linewidth=0.8)
-                ax2.axhline(30, color="green", linestyle="--", linewidth=0.8)
-                ax2.set_title("RSI")
-                ax2.set_ylim(0, 100)
-                ax2.legend()
-
-                plt.tight_layout()
-                plt.savefig(image_path)
-                plt.close()
-
-                send_telegram_alert(msg)
-                send_telegram_chart(image_path)
-
-        else:
-            # Alleen alerts bij >8% stijging
-            if change_pct_1h > 8:
-                msg = (
-                    f"🚀 *{name} Pump Alert!*\n"
-                    f"📈 1h Change: +{change_pct_1h:.2f}%\n"
-                    f"📅 24h Change: {day_icon} {change_pct_24h:.2f}%\n"
-                    f"{trend_icon} (MA{MA_PERIOD})\n"
-                    f"*STRONG PUMP*"
-                )
-                send_telegram_alert(msg)
-
-        if name == "Bitcoin" and now.hour % 2 == 0 and now.minute < 30:
-            overview_msg = (
-                f"📊 *Bitcoin Overview*\n"
-                f"🕒 2h Change: {one_hour_icon} {change_pct_1h:.2f}%\n"
-                f"📅 24h Change: {day_icon} {change_pct_24h:.2f}%\n"
-                f"{trend_icon}"
+        # 4) Verzamel alerts
+        alerts = []
+        # 4a) Prijs
+        if abs(pct_change) >= info["threshold"]:
+            arrow = "📈" if pct_change > 0 else "📉"
+            word  = "Pump" if pct_change > 0 else "Dump"
+            alerts.append(
+                f"{arrow} *{info['name']} {word}!* {pct_change:+.2f}%"
             )
-            send_telegram_alert(overview_msg)
+        # 4b) Volume
+        if spike:
+            alerts.append(
+                f"🔊 *{info['name']} Volume Spike!* {int(current_vol):,}"
+            )
+
+        # 5) Verstuur (tekst + chart) als er iets te melden valt
+        if alerts:
+            ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+            text = f"🕒 *{ts}*\n" + "\n".join(alerts)
+            send_telegram_alert(text)
+
+            # 📊 Mini-grafiek (5 candles + huidige)
+            df_chart = df.iloc[-6:].copy()
+            chart_file = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
+            plt.figure(figsize=(4,2))
+            plt.plot(df_chart["datetime"], df_chart["close"], linewidth=1.5)
+            plt.title(f"{info['name']} Price")
+            plt.tight_layout()
+            plt.savefig(chart_file)
+            plt.close()
+
+            send_telegram_chart(str(chart_file))
 
     except Exception as e:
-        error_msg = f"[ERROR] Exception bij {name}: {str(e)}"
-        send_telegram_alert(error_msg)
+        err = f"[ERROR] {symbol}: {e}"
+        send_telegram_alert(err)
