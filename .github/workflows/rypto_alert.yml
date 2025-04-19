@@ -1,4 +1,4 @@
-name: RSI Alert
+name: Crypto Alert
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:        # handmatig starten via GitHub
 
 jobs:
-  check-rsi:
+  check-crypto:
     runs-on: ubuntu-latest
     env:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -25,5 +25,5 @@ jobs:
       - name: Install dependencies
         run: pip install requests pandas matplotlib
 
-      - name: Run RSI Alert script
-        run: python btc_alert.py
+      - name: Run Crypto Alert script
+        run: python crypto_alert.py
