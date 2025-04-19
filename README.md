@@ -1,85 +1,77 @@
-# Crypto RSI Alert Bot
+Crypto Alert Bot
 
-A fully automated Python script that analyzes price action and technical indicators (RSI, MA50, price change %, volume) for multiple cryptocurrencies and sends real-time alerts to Telegram. Built for traders who want to catch strong market moves without noise.
+A fully automated Python script that monitors Bitcoin (BTC), Solana (SOL), and Chainlink (LINK) every 30 minutes to catch rapid pumps, dumps, and volatility spikes, and sends real-time alerts to Telegram.
 
----
+Features
 
-## Features
+Supports Bitcoin (BTC), Solana (SOL), and Chainlink (LINK)
 
-- Supports Bitcoin (BTC), Solana (SOL), and Chainlink (LINK)
-- Runs every **30 minutes** using GitHub Actions
-- Checks:
-  - 1h price change % (detect pump/dump)
-  - 24h price change % (daily overview)
-  - RSI (overbought / oversold)
-  - MA50 (trend)
-  - Volume spikes (confirmation)
-- Sends alerts via **Telegram bot** with Markdown formatting and price charts
-- Only triggers on actionable advice (BUY, SELL, STRONG BUY/SELL)
-- Sends daily price overview at **10:00 AM**
+Runs every 30 minutes via GitHub Actions (cron & manual dispatch)
 
----
+Price-action alerts (BTC ≥1.5%, SOL/LINK ≥2.5% per 30 min candle)
 
-## Requirements
+ATR-based volatility spikes (True Range ≥1.2×ATR(14))
 
-- GitHub account with GitHub Actions enabled
-- Telegram bot 
-- Secrets configured:
-  - `TWELVE_API_KEY`: API key from https://twelvedata.com
-  - `BOT_TOKEN`: Your Telegram bot token
-  - `CHAT_ID`: Your main Telegram user ID
-  - *(Optional)* `EXTRA_CHAT_ID`: For second person to receive alerts
+Test-run mode reports all coins with current % change and ATR
 
----
+Mini price charts for quick visual context
 
-## How it works
+Requirements
 
-1. GitHub Actions runs the script every 30 minutes
-2. For each coin:
-   - Downloads historical price + volume data from Twelve Data
-   - Calculates RSI, MA50, price changes, and volume average
-   - If strong price movement + volume spike → triggers STRONG BUY/SELL
-   - If RSI/MA suggest a setup → triggers BUY/SELL fallback
-3. Sends an alert to Telegram including:
-   - Indicator values
-   - Market sentiment
-   - Advice + chart image
+Python 3.10+ with:
 
-4. At 10:00 AM, sends daily change report even if no alerts triggered
+requests
 
----
+pandas
 
-## Example Alert
-```
-*Bitcoin*
-*RSI:* 72.15
-*Change (1h):* +3.57%
-*Change (24h):* +6.03%
-*Trend:* UP (MA50)
-*Volume:* 20500 vs MA: 12300
-*Advice:* STRONG SELL
-Sentiment: Bearish + Volume Spike
-```
+matplotlib
 
----
+Telegram bot token & chat ID
 
-## Customize
-- Change alert thresholds in the `btc_alert.py` logic
-- Add more coins to the `COINS` dictionary
-- Adjust `MA_PERIOD` or `RSI_PERIOD` for different strategies
+TwelveData API key
 
----
+GitHub Actions for scheduling
 
-## Testing
-You can manually run the script via GitHub Actions → "Run workflow". If no alerts are triggered, it will remain silent (except 10:00 daily update).
+How It Works
 
----
+Schedule: GitHub Actions triggers every 30 minutes (and supports manual workflow_dispatch).
 
-## Security
-This repo uses GitHub Secrets for all credentials. Never commit your API key or bot token directly.
+Data: Fetches last 6 candles (30 min interval) for each coin via TwelveData.
 
----
+Price Alerts: Compares current vs. previous close; triggers Pump/Dump alerts when thresholds are met.
 
-## License
-MIT — free to use, modify and share.
-Robin A. 2025
+Volatility Alerts: Fetches ATR(14) and flags True Range spikes ≥1.2×ATR.
+
+Notifications: Sends Telegram messages with emoji, text, and mini price charts.
+
+Test Mode: On manual runs, reports all current changes and ATR without filtering.
+
+Example Alert
+
+🕒 2025-04-19 12:00 UTC
+📈 Bitcoin Pump! +2.30%
+⚡ Bitcoin Volatility! TR 450.00 ≥ 1.2×ATR(380.00)
+
+Customize
+
+Adjust thresholds in the COINS dictionary in crypto_alert.py
+
+Modify ATR_PERIOD and ATR_MULTIPLIER for volatility sensitivity
+
+Add or remove coins in COINS
+
+Testing
+
+Use the Run workflow button in GitHub Actions to trigger a test run.
+
+In test mode, you’ll get a summary of all coins regardless of thresholds.
+
+Security
+
+Store TWELVE_API_KEY, BOT_TOKEN, and CHAT_ID as GitHub Secrets.
+
+Do not commit credentials to the repository.
+
+License
+
+MIT © Robin A. 2025
