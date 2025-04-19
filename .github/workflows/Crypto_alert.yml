@@ -2,8 +2,8 @@ name: Crypto Alert
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # elke 30 min
-  workflow_dispatch:        # handmatig starten via GitHub
+    - cron: '*/15 * * * *'  # every 15 minutes
+  workflow_dispatch:        # manual trigger
 
 jobs:
   check-crypto:
