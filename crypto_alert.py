@@ -20,8 +20,8 @@ COINS = {
     "LINK/USD": {"name": "Chainlink","threshold": 1.6}
 }
 INTERVAL       = "15min"
-OUTPUTSIZE     = 5   # last 5 candles for ATR comparison
-ATR_PERIOD     = 14  # candles for ATR
+OUTPUTSIZE     = 5   # number of candles for ATR comparison
+ATR_PERIOD     = 14  # candles for ATR calculation
 ATR_MULTIPLIER = 1.2 # True Range ≥1.2×ATR → volatility spike
 
 # ✅ TELEGRAM HELPERS
@@ -63,20 +63,24 @@ def fetch_atr(symbol):
 if manual_run:
     ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
     lines = [f"🧪 *Test Run* {ts}"]
+
     for symbol, info in COINS.items():
+        name = info['name']
         # Price data
         data = fetch_time_series(symbol)
         if "values" not in data:
-            lines.append(f"*{info['name']}* – ❌ no data")
+            lines.append(f"*{name}* – ❌ no data")
             continue
+
         df = pd.DataFrame(data["values"])  
         df = df.astype({"close": float, "high": float, "low": float})
         df = df.iloc[::-1].reset_index(drop=True)
+
         curr, prev = df["close"].iloc[-1], df["close"].iloc[-2]
         pct = (curr - prev) / prev * 100
         price_arrow = "🚀" if pct > 0 else "🚨"
         verb = "rocketed" if pct > 0 else "plunged"
-        price_line = f"{price_arrow} {info['name']} just {verb} {pct:+.2f}% in 15 min!"
+        price_line = f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15min!"
 
         # ATR data
         atr_data = fetch_atr(symbol)
@@ -88,13 +92,14 @@ if manual_run:
                 atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
             except:
                 pass
+
         if atr_val and atr_prev:
             delta = atr_val - atr_prev
             dir_arrow = "📈" if delta > 0 else "📉"
             delta_pct = delta / atr_prev * 100
-            atr_line = f"{dir_arrow} Volatility {'up' if delta>0 else 'down'} (ATR {dir_arrow} {delta_pct:+.2f}%)"
+            atr_line = f"{dir_arrow} {name} volatility {'up' if delta>0 else 'down'} (ATR {dir_arrow} {delta_pct:+.2f}%)"
         else:
-            atr_line = "📈 Volatility data unavailable"
+            atr_line = f"📈 {name} volatility data unavailable"
 
         lines.append(price_line)
         lines.append(atr_line)
@@ -105,24 +110,25 @@ if manual_run:
 # ── NORMAL ALERT MODE (cron) ──
 for symbol, info in COINS.items():
     try:
+        name = info['name']
         # Price data
         data = fetch_time_series(symbol)
         if "values" not in data:
             continue
+
         df = pd.DataFrame(data["values"])
         df = df.astype({"close": float, "high": float, "low": float})
         df = df.iloc[::-1].reset_index(drop=True)
+
         curr, prev = df["close"].iloc[-1], df["close"].iloc[-2]
         pct = (curr - prev) / prev * 100
-
         alerts = []
+
         # Price trigger
         if abs(pct) >= info["threshold"]:
             price_arrow = "🚀" if pct > 0 else "🚨"
             verb = "rocketed" if pct > 0 else "plunged"
-            alerts.append(
-                f"{price_arrow} {info['name']} just {verb} {pct:+.2f}% in 15 min!"
-            )
+            alerts.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15min!")
 
         # ATR trigger
         atr_data = fetch_atr(symbol)
@@ -134,13 +140,16 @@ for symbol, info in COINS.items():
                 atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
             except:
                 pass
+
         if atr_val and atr_prev:
             true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
             if true_range >= atr_val * ATR_MULTIPLIER:
-                dir_arrow = "📈" if atr_val > atr_prev else "📉"
+                delta = atr_val - atr_prev
+                dir_arrow = "📈" if delta > 0 else "📉"
+                delta_pct = delta / atr_prev * 100
                 alerts.append(
-                    f"{dir_arrow} Volatility {'up' if atr_val>atr_prev else 'down'} "
-                    f"(ATR {dir_arrow} {((atr_val-atr_prev)/atr_prev)*100:+.2f}%)"
+                    f"{dir_arrow} {name} volatility {'up' if delta>0 else 'down'} "
+                    f"(ATR {dir_arrow} {delta_pct:+.2f}%)"
                 )
 
         # Send alerts
