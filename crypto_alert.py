@@ -19,7 +19,7 @@ API_KEY        = os.environ['TWELVE_API_KEY']
 COINS = {
     "BTC/USD": {"name": "Bitcoin",   "threshold": 1.5},
     "SOL/USD": {"name": "Solana",    "threshold": 2.5},
-    "LINK/USD":{"name": "Chainlink","threshold": 2.5}
+    "LINK/USD": {"name": "Chainlink","threshold": 2.5}
 }
 INTERVAL       = "30min"
 OUTPUTSIZE     = 6    # 5 + 1 for chart
@@ -66,7 +66,7 @@ def fetch_atr(symbol):
             "symbol": symbol,
             "interval": INTERVAL,
             "time_period": ATR_PERIOD,
-            "outputsize": ATR_PERIOD+1,  # get last + previous
+            "outputsize": ATR_PERIOD + 1,
             "apikey": API_KEY
         }
     ).json()
@@ -76,34 +76,34 @@ if manual_run:
     ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
     lines = [f"🧪 *Test Run* {ts}"]
     for symbol, info in COINS.items():
-        # 1) Prices
         ts_data = fetch_time_series(symbol)
         if "values" not in ts_data:
             lines.append(f"*{info['name']}* – ❌ no data")
             continue
 
-        df = pd.DataFrame(ts_data["values"])
+        df = pd.DataFrame(ts_data["values"]) 
         df = df.astype({"close": float, "high": float, "low": float})
         df = df.iloc[::-1].reset_index(drop=True)
         curr, prev = df["close"].iloc[-1], df["close"].iloc[-2]
         pct = (curr - prev) / prev * 100
-        arrow = "📈" if pct>0 else "📉"
-        word  = "Pump" if pct>0 else "Dump"
+        arrow = "📈" if pct > 0 else "📉"
+        word  = "Pump" if pct > 0 else "Dump"
 
-        # 2) ATR + direction
+        # ATR and direction
         atr_data = fetch_atr(symbol)
-        atr_val = atr_prev = None
+        atr_val, atr_prev = None, None
         if atr_data.get("values"):
             vals = atr_data["values"]
-            # parse last and prev ATR
-            for v in (vals[-2], vals[-1]):
-                # entries may come as { "ATR": "..."}
-                setattr(locals(), "atr_prev" if v is vals[-2] else "atr_val",
-                        float(v.get("ATR") or v.get("atr") or 0))
+            # parse previous and current ATR
+            try:
+                atr_prev = float(vals[-2].get("ATR") or vals[-2].get("atr"))
+                atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
+            except:
+                atr_prev, atr_val = None, None
         if atr_val and atr_prev:
-            delta_atr = atr_val - atr_prev
-            dir_arrow = "🔼" if delta_atr>0 else "🔽"
-            delta_pct = delta_atr/atr_prev*100
+            delta = atr_val - atr_prev
+            dir_arrow = "🔼" if delta > 0 else "🔽"
+            delta_pct = (delta / atr_prev) * 100
             atr_line = f"⚡ ATR{dir_arrow} {atr_val:.2f} ({delta_pct:+.2f}%)"
         else:
             atr_line = "⚡ ATR unavailable"
@@ -116,7 +116,6 @@ if manual_run:
 # ── NORMAL ALERT MODE (cron) ──
 for symbol, info in COINS.items():
     try:
-        # price data
         ts_data = fetch_time_series(symbol)
         if "values" not in ts_data:
             continue
@@ -129,35 +128,34 @@ for symbol, info in COINS.items():
         pct = (curr - prev) / prev * 100
 
         alerts = []
-        # 1) Price-trigger
+        # Price trigger
         if abs(pct) >= info["threshold"]:
-            arrow = "📈" if pct>0 else "📉"
-            word  = "Pump" if pct>0 else "Dump"
+            arrow = "📈" if pct > 0 else "📉"
+            word  = "Pump" if pct > 0 else "Dump"
             alerts.append(f"{arrow} *{info['name']} {word}!* {pct:+.2f}%")
 
-        # 2) ATR-trigger
+        # ATR trigger
         atr_data = fetch_atr(symbol)
-        atr_val = atr_prev = None
+        atr_val, atr_prev = None, None
         if atr_data.get("values"):
             vals = atr_data["values"]
-            for v in (vals[-2], vals[-1]):
-                setattr(locals(),
-                        "atr_prev" if v is vals[-2] else "atr_val",
-                        float(v.get("ATR") or v.get("atr") or 0))
+            try:
+                atr_prev = float(vals[-2].get("ATR") or vals[-2].get("atr"))
+                atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
+            except:
+                atr_prev, atr_val = None, None
         if atr_val and atr_prev:
             true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
             if true_range >= atr_val * ATR_MULTIPLIER:
-                dir_arrow = "🔼" if atr_val>atr_prev else "🔽"
+                dir_arrow = "🔼" if atr_val > atr_prev else "🔽"
                 alerts.append(
-                    f"⚡ *{info['name']} Volatility{dir_arrow}!* "
-                    f"TR {true_range:.2f} ≥ {ATR_MULTIPLIER}×ATR({atr_val:.2f})"
+                    f"⚡ *{info['name']} Volatility{dir_arrow}!* TR {true_range:.2f} ≥ {ATR_MULTIPLIER}×ATR({atr_val:.2f})"
                 )
 
-        # 3) Dispatch
         if alerts:
             ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
             send_telegram_alert(f"🕒 *{ts}*\n" + "\n".join(alerts))
-            # mini chart
+
             chart = df.iloc[-OUTPUTSIZE:].copy()
             path  = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
             plt.figure(figsize=(4,2))
