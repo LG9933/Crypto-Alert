@@ -9,6 +9,10 @@ import os
 import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
+import sys
+
+# ── Detect manual run via GitHub Actions ──
+manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
@@ -18,8 +22,8 @@ COINS = {
     "LINK/USD":{"name": "Chainlink","threshold": 2.5}
 }
 INTERVAL = "30min"
-OUTPUTSIZE = 6  # 5 + 1 voor prijsverandering & (optioneel) volume
-VOLUME_SPIKE_MULTIPLIER = 1.5  # merk volume alleen als veld bestaat
+OUTPUTSIZE = 6
+VOLUME_SPIKE_MULTIPLIER = 1.5
 
 # ✅ TELEGRAM HELPERS
 def send_telegram_alert(message, chat_id=None):
@@ -41,62 +45,109 @@ def send_telegram_chart(image_path, chat_id=None):
 # Zorg dat /tmp bestaat
 Path("/tmp").mkdir(parents=True, exist_ok=True)
 
-# 🔁 MAIN LOOP (run via cron elke 30m)
+# ── Manual/Test Mode ──
+if manual_run:
+    summaries = []
+    for symbol, info in COINS.items():
+        # Haal data
+        resp = requests.get(
+            "https://api.twelvedata.com/time_series",
+            params={
+                "symbol": symbol,
+                "interval": INTERVAL,
+                "outputsize": OUTPUTSIZE,
+                "apikey": API_KEY
+            }
+        ).json()
+        if "values" not in resp:
+            summaries.append(f"*{info['name']}* – ❌ geen data")
+            continue
+
+        df = pd.DataFrame(resp["values"])
+        df["close"] = df["close"].astype(float)
+        df = df.iloc[::-1].reset_index(drop=True)
+
+        # Prijs en change
+        current_close  = df["close"].iloc[-1]
+        previous_close = df["close"].iloc[-2]
+        pct_change     = (current_close - previous_close) / previous_close * 100
+
+        # Volume (optioneel)
+        if "volume" in df.columns:
+            df["volume"] = df["volume"].astype(float)
+            vols        = df["volume"].iloc[-6:-1]
+            avg_vol     = vols.mean()
+            current_vol = df["volume"].iloc[-1]
+            vol_str     = f"AvgVol {avg_vol:,.0f}, CurVol {current_vol:,.0f}"
+        else:
+            vol_str     = "Volumedata niet beschikbaar"
+
+        summaries.append(
+            f"*{info['name']}*\n"
+            f"Price: {current_close:.2f}, Δ {pct_change:+.2f}%\n"
+            f"{vol_str}"
+        )
+
+    text = "🧪 *Test Run*\n" + "\n\n".join(summaries)
+    send_telegram_alert(text)
+    sys.exit()
+
+
+# ── Normal Alert Mode (cron) ──
 for symbol, info in COINS.items():
     try:
         # 1) Data ophalen
-        url = (
-            f"https://api.twelvedata.com/time_series"
-            f"?symbol={symbol}&interval={INTERVAL}"
-            f"&outputsize={OUTPUTSIZE}&apikey={API_KEY}"
-        )
-        resp = requests.get(url).json()
+        resp = requests.get(
+            "https://api.twelvedata.com/time_series",
+            params={
+                "symbol": symbol,
+                "interval": INTERVAL,
+                "outputsize": OUTPUTSIZE,
+                "apikey": API_KEY
+            }
+        ).json()
         if "values" not in resp:
             continue
 
         df = pd.DataFrame(resp["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df["close"]    = df["close"].astype(float)
-        df = df.iloc[::-1].reset_index(drop=True)  # chronologisch
+        df = df.iloc[::-1].reset_index(drop=True)
 
-        # 2) Prijsverandering laatste candle
+        # 2) Prijsverandering
         current_close  = df["close"].iloc[-1]
         previous_close = df["close"].iloc[-2]
         pct_change     = (current_close - previous_close) / previous_close * 100
 
-        # 3) Optioneel volume-spike (slechts als kolom aanwezig)
+        # 3) Volume-spike?
         spike_alert = False
-        vol_info = ""
+        vol_msg     = ""
         if "volume" in df.columns:
             df["volume"] = df["volume"].astype(float)
-            vols         = df["volume"].iloc[-6:-1]  # 5 candles vóór de huidige
+            vols         = df["volume"].iloc[-6:-1]
             avg_vol      = vols.mean()
             current_vol  = df["volume"].iloc[-1]
             if current_vol > avg_vol * VOLUME_SPIKE_MULTIPLIER:
                 spike_alert = True
-                vol_info    = f"🔊 *{info['name']} Volume Spike!* {int(current_vol):,}"
+                vol_msg     = f"🔊 *{info['name']} Volume Spike!* {int(current_vol):,}"
 
-        # 4) Verzamel alerts
+        # 4) Bouw alerts
         alerts = []
-        # 4a) Prijs
         if abs(pct_change) >= info["threshold"]:
             arrow = "📈" if pct_change > 0 else "📉"
             word  = "Pump" if pct_change > 0 else "Dump"
             alerts.append(f"{arrow} *{info['name']} {word}!* {pct_change:+.2f}%")
-
-        # 4b) Volume
         if spike_alert:
-            alerts.append(vol_info)
+            alerts.append(vol_msg)
 
-        # 5) Verstuur als er iets is
+        # 5) Verstuur
         if alerts:
             ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-            text = f"🕒 *{ts}*\n" + "\n".join(alerts)
-            send_telegram_alert(text)
+            send_telegram_alert(f"🕒 *{ts}*\n" + "\n".join(alerts))
 
-            # 📊 Mini-grafiek (5 candles + huidige)
-            df_chart    = df.iloc[-6:].copy()
-            chart_file  = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
+            # Mini-grafiek
+            df_chart   = df.iloc[-6:].copy()
+            chart_file = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
             plt.figure(figsize=(4,2))
             plt.plot(df_chart["datetime"], df_chart["close"], linewidth=1.5)
             plt.title(f"{info['name']} Price")
@@ -107,6 +158,4 @@ for symbol, info in COINS.items():
             send_telegram_chart(str(chart_file))
 
     except Exception as e:
-        # Foutmelding sturen zonder te crashen
-        err = f"[ERROR] {symbol}: {e}"
-        send_telegram_alert(err)
+        send_telegram_alert(f"[ERROR] {symbol}: {e}")
