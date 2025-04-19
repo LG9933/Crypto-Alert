@@ -1,5 +1,5 @@
-Crypto Alert Bot
-
+**Crypto Alert Bot
+**
 A fully automated Python script that monitors Bitcoin (BTC), Solana (SOL), and Chainlink (LINK) every 30 minutes to catch rapid pumps, dumps, and volatility spikes, and sends real-time alerts to Telegram.
 
 Features
@@ -16,8 +16,8 @@ Test-run mode reports all coins with current % change and ATR
 
 Mini price charts for quick visual context
 
-Requirements
-
+**Requirements
+**
 Python 3.10+ with:
 
 requests
