@@ -15,147 +15,158 @@ import sys
 manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 
 # 🧠 CONFIG
-API_KEY = os.environ['TWELVE_API_KEY']
+API_KEY            = os.environ['TWELVE_API_KEY']
 COINS = {
     "BTC/USD": {"name": "Bitcoin",  "threshold": 1.5},
     "SOL/USD": {"name": "Solana",   "threshold": 2.5},
     "LINK/USD":{"name": "Chainlink","threshold": 2.5}
 }
-INTERVAL = "30min"
-OUTPUTSIZE = 6
-VOLUME_SPIKE_MULTIPLIER = 1.5
+INTERVAL           = "30min"
+OUTPUTSIZE         = 6   # 5 + 1 voor mini-grafiek
+ATR_PERIOD         = 14  # aantal candles voor ATR
+ATR_MULTIPLIER     = 1.2 # True Range ≥ 1.2×ATR → volatility spike
 
 # ✅ TELEGRAM HELPERS
 def send_telegram_alert(message, chat_id=None):
     token = os.environ['BOT_TOKEN']
     cid   = chat_id or os.environ['CHAT_ID']
     url   = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": cid, "text": message, "parse_mode": "Markdown"}
-    requests.post(url, data=payload)
+    requests.post(url, data={
+        "chat_id": cid,
+        "text": message,
+        "parse_mode": "Markdown"
+    })
 
 def send_telegram_chart(image_path, chat_id=None):
     token = os.environ['BOT_TOKEN']
     cid   = chat_id or os.environ['CHAT_ID']
     url   = f"https://api.telegram.org/bot{token}/sendPhoto"
     with open(image_path, 'rb') as photo:
-        files = {"photo": photo}
-        data  = {"chat_id": cid}
-        requests.post(url, files=files, data=data)
+        requests.post(url, files={"photo":photo}, data={"chat_id":cid})
 
 # Zorg dat /tmp bestaat
 Path("/tmp").mkdir(parents=True, exist_ok=True)
 
-# ── Manual/Test Mode ──
+# ── HELPERS ──
+def fetch_time_series(symbol):
+    return requests.get(
+        "https://api.twelvedata.com/time_series",
+        params={
+            "symbol": symbol,
+            "interval": INTERVAL,
+            "outputsize": OUTPUTSIZE,
+            "apikey": API_KEY
+        }
+    ).json()
+
+def fetch_atr(symbol):
+    return requests.get(
+        "https://api.twelvedata.com/atr",
+        params={
+            "symbol": symbol,
+            "interval": INTERVAL,
+            "time_period": ATR_PERIOD,
+            "apikey": API_KEY
+        }
+    ).json()
+
+# ── TEST‑RUN MODE ──
 if manual_run:
-    summaries = []
+    lines = []
+    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
     for symbol, info in COINS.items():
-        # Haal data
-        resp = requests.get(
-            "https://api.twelvedata.com/time_series",
-            params={
-                "symbol": symbol,
-                "interval": INTERVAL,
-                "outputsize": OUTPUTSIZE,
-                "apikey": API_KEY
-            }
-        ).json()
-        if "values" not in resp:
-            summaries.append(f"*{info['name']}* – ❌ geen data")
+        # 1) time_series
+        ts_data = fetch_time_series(symbol)
+        if "values" not in ts_data:
+            lines.append(f"*{info['name']}* – ❌ geen TS-data")
             continue
 
-        df = pd.DataFrame(resp["values"])
+        df = pd.DataFrame(ts_data["values"])
         df["close"] = df["close"].astype(float)
+        df["high"]  = df["high"].astype(float)
+        df["low"]   = df["low"].astype(float)
         df = df.iloc[::-1].reset_index(drop=True)
 
-        # Prijs en change
-        current_close  = df["close"].iloc[-1]
-        previous_close = df["close"].iloc[-2]
-        pct_change     = (current_close - previous_close) / previous_close * 100
+        curr = df["close"].iloc[-1]
+        prev = df["close"].iloc[-2]
+        pct  = (curr - prev) / prev * 100
 
-        # Volume (optioneel)
-        if "volume" in df.columns:
-            df["volume"] = df["volume"].astype(float)
-            vols        = df["volume"].iloc[-6:-1]
-            avg_vol     = vols.mean()
-            current_vol = df["volume"].iloc[-1]
-            vol_str     = f"AvgVol {avg_vol:,.0f}, CurVol {current_vol:,.0f}"
+        # 2) ATR
+        atr_data = fetch_atr(symbol)
+        if "values" in atr_data:
+            atr_val     = float(atr_data["values"][-1]["ATR"])
+            true_range  = df["high"].iloc[-1] - df["low"].iloc[-1]
+            spike_flag  = true_range >= atr_val * ATR_MULTIPLIER
+            atr_line    = (
+                f"⚡ ATR {atr_val:.2f}, TR {true_range:.2f}"
+                + (" ✅ spike" if spike_flag else "")
+            )
         else:
-            vol_str     = "Volumedata niet beschikbaar"
+            atr_line = "⚡ ATR‑data niet beschikbaar"
 
-        summaries.append(
-            f"*{info['name']}*\n"
-            f"Price: {current_close:.2f}, Δ {pct_change:+.2f}%\n"
-            f"{vol_str}"
+        # 3) Arrow + label
+        arrow = "📈" if pct > 0 else "📉"
+        word  = "Pump" if pct > 0 else "Dump"
+        lines.append(
+            f"{arrow} *{info['name']} {word}* {pct:+.2f}%\n{atr_line}"
         )
 
-    text = "🧪 *Test Run*\n" + "\n\n".join(summaries)
-    send_telegram_alert(text)
+    send_telegram_alert(f"🧪 *Test Run* {ts}\n" + "\n\n".join(lines))
     sys.exit()
 
-
-# ── Normal Alert Mode (cron) ──
+# ── NORMAL ALERT MODE (cron) ──
 for symbol, info in COINS.items():
     try:
-        # 1) Data ophalen
-        resp = requests.get(
-            "https://api.twelvedata.com/time_series",
-            params={
-                "symbol": symbol,
-                "interval": INTERVAL,
-                "outputsize": OUTPUTSIZE,
-                "apikey": API_KEY
-            }
-        ).json()
-        if "values" not in resp:
+        # 1) time_series
+        ts_data = fetch_time_series(symbol)
+        if "values" not in ts_data:
             continue
 
-        df = pd.DataFrame(resp["values"])
+        df = pd.DataFrame(ts_data["values"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         df["close"]    = df["close"].astype(float)
+        df["high"]     = df["high"].astype(float)
+        df["low"]      = df["low"].astype(float)
         df = df.iloc[::-1].reset_index(drop=True)
 
-        # 2) Prijsverandering
-        current_close  = df["close"].iloc[-1]
-        previous_close = df["close"].iloc[-2]
-        pct_change     = (current_close - previous_close) / previous_close * 100
+        curr = df["close"].iloc[-1]
+        prev = df["close"].iloc[-2]
+        pct  = (curr - prev) / prev * 100
 
-        # 3) Volume-spike?
-        spike_alert = False
-        vol_msg     = ""
-        if "volume" in df.columns:
-            df["volume"] = df["volume"].astype(float)
-            vols         = df["volume"].iloc[-6:-1]
-            avg_vol      = vols.mean()
-            current_vol  = df["volume"].iloc[-1]
-            if current_vol > avg_vol * VOLUME_SPIKE_MULTIPLIER:
-                spike_alert = True
-                vol_msg     = f"🔊 *{info['name']} Volume Spike!* {int(current_vol):,}"
-
-        # 4) Bouw alerts
         alerts = []
-        if abs(pct_change) >= info["threshold"]:
-            arrow = "📈" if pct_change > 0 else "📉"
-            word  = "Pump" if pct_change > 0 else "Dump"
-            alerts.append(f"{arrow} *{info['name']} {word}!* {pct_change:+.2f}%")
-        if spike_alert:
-            alerts.append(vol_msg)
 
-        # 5) Verstuur
+        # 2) Price threshold
+        if abs(pct) >= info["threshold"]:
+            arrow = "📈" if pct > 0 else "📉"
+            word  = "Pump" if pct > 0 else "Dump"
+            alerts.append(f"{arrow} *{info['name']} {word}!* {pct:+.2f}%")
+
+        # 3) ATR‑based volatility spike
+        atr_data = fetch_atr(symbol)
+        if "values" in atr_data:
+            atr_val    = float(atr_data["values"][-1]["ATR"])
+            true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
+            if true_range >= atr_val * ATR_MULTIPLIER:
+                alerts.append(
+                    f"⚡ *{info['name']} Volatility!* TR {true_range:.2f} ≥ "
+                    f"{ATR_MULTIPLIER}×ATR({atr_val:.2f})"
+                )
+
+        # 4) Send alerts + mini‑chart
         if alerts:
             ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
             send_telegram_alert(f"🕒 *{ts}*\n" + "\n".join(alerts))
 
-            # Mini-grafiek
-            df_chart   = df.iloc[-6:].copy()
-            chart_file = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
+            chart = df.iloc[-OUTPUTSIZE:].copy()
+            path  = Path(f"/tmp/chart_{symbol.replace('/','_')}.png")
             plt.figure(figsize=(4,2))
-            plt.plot(df_chart["datetime"], df_chart["close"], linewidth=1.5)
+            plt.plot(chart["datetime"], chart["close"], linewidth=1.5)
             plt.title(f"{info['name']} Price")
             plt.tight_layout()
-            plt.savefig(chart_file)
+            plt.savefig(path)
             plt.close()
 
-            send_telegram_chart(str(chart_file))
+            send_telegram_chart(str(path))
 
     except Exception as e:
         send_telegram_alert(f"[ERROR] {symbol}: {e}")
