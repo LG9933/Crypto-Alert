@@ -19,10 +19,11 @@ COINS = {
     "SOL/USD": {"name": "Solana",    "threshold": 1.6},
     "LINK/USD": {"name": "Chainlink","threshold": 1.6}
 }
-INTERVAL       = "15min"
-OUTPUTSIZE     = 5   # number of candles for ATR comparison
-ATR_PERIOD     = 14  # candles for ATR calculation
-ATR_MULTIPLIER = 1.2 # True Range ≥1.2×ATR → volatility spike
+INTERVAL    = "15min"
+OUTPUTSIZE  = 5   # last 5 candles for price change
+BB_PERIOD   = 20  # Bollinger Bands period
+NBDEVUP     = 2   # upper band deviation
+NBDEVDN     = 2   # lower band deviation
 
 # ✅ TELEGRAM HELPERS
 def send_telegram_alert(message, chat_id=None):
@@ -47,14 +48,16 @@ def fetch_time_series(symbol):
         }
     ).json()
 
-def fetch_atr(symbol):
+def fetch_bbands(symbol):
     return requests.get(
-        "https://api.twelvedata.com/atr",
+        "https://api.twelvedata.com/bbands",
         params={
             "symbol": symbol,
             "interval": INTERVAL,
-            "time_period": ATR_PERIOD,
-            "outputsize": 2,
+            "time_period": BB_PERIOD,
+            "series_type": "close",
+            "nbdevup": NBDEVUP,
+            "nbdevdn": NBDEVDN,
             "apikey": API_KEY
         }
     ).json()
@@ -66,43 +69,36 @@ if manual_run:
 
     for symbol, info in COINS.items():
         name = info['name']
-        # Price data
+        # Fetch price data
         data = fetch_time_series(symbol)
         if "values" not in data:
             lines.append(f"*{name}* – ❌ no data")
             continue
-
-        df = pd.DataFrame(data["values"])  
-        df = df.astype({"close": float, "high": float, "low": float})
+        df = pd.DataFrame(data["values"]).astype({"close": float})
         df = df.iloc[::-1].reset_index(drop=True)
-
         curr, prev = df["close"].iloc[-1], df["close"].iloc[-2]
         pct = (curr - prev) / prev * 100
         price_arrow = "🚀" if pct > 0 else "🚨"
         verb = "rocketed" if pct > 0 else "plunged"
-        price_line = f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15min!"
+        price_line = f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15 min!"
 
-        # ATR data
-        atr_data = fetch_atr(symbol)
-        atr_val = atr_prev = None
-        if atr_data.get("values"):
-            vals = atr_data["values"]
-            try:
-                atr_prev = float(vals[-2].get("ATR") or vals[-2].get("atr"))
-                atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
-            except:
-                pass
-
-        if atr_val and atr_prev:
-            delta = atr_val - atr_prev
-            dir_arrow = "📈" if delta > 0 else "📉"
-            delta_pct = delta / atr_prev * 100
-            atr_line = f"{dir_arrow} {name} volatility {'up' if delta>0 else 'down'} (ATR {dir_arrow} {delta_pct:+.2f}%)"
-        else:
-            atr_line = f"📈 {name} volatility data unavailable"
+        # Fetch BBANDS data
+        bb = fetch_bbands(symbol)
+        bb_line = f"📈 {name} BB data unavailable"
+        if "values" in bb and bb["values"]:
+            last = bb["values"][-1]
+            upper = float(last.get("upperband", last.get("uband", 0)))
+            lower = float(last.get("lowerband", last.get("lband", 0)))
+            # Determine breakout
+            if curr > upper:
+                bb_line = f"📈 {name} broke above upper BB (Close {curr:.2f} > {upper:.2f})"
+            elif curr < lower:
+                bb_line = f"📉 {name} fell below lower BB (Close {curr:.2f} < {lower:.2f})"
+            else:
+                bb_line = f"⚪ {name} within BB range"
 
         lines.append(price_line)
-        lines.append(atr_line)
+        lines.append(bb_line)
 
     send_telegram_alert("\n".join(lines))
     sys.exit()
@@ -115,42 +111,28 @@ for symbol, info in COINS.items():
         data = fetch_time_series(symbol)
         if "values" not in data:
             continue
-
-        df = pd.DataFrame(data["values"])
-        df = df.astype({"close": float, "high": float, "low": float})
+        df = pd.DataFrame(data["values"]).astype({"close": float})
         df = df.iloc[::-1].reset_index(drop=True)
-
         curr, prev = df["close"].iloc[-1], df["close"].iloc[-2]
         pct = (curr - prev) / prev * 100
-        alerts = []
 
+        alerts = []
         # Price trigger
         if abs(pct) >= info["threshold"]:
             price_arrow = "🚀" if pct > 0 else "🚨"
             verb = "rocketed" if pct > 0 else "plunged"
-            alerts.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15min!")
+            alerts.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15 min!")
 
-        # ATR trigger
-        atr_data = fetch_atr(symbol)
-        atr_val = atr_prev = None
-        if atr_data.get("values"):
-            vals = atr_data["values"]
-            try:
-                atr_prev = float(vals[-2].get("ATR") or vals[-2].get("atr"))
-                atr_val  = float(vals[-1].get("ATR") or vals[-1].get("atr"))
-            except:
-                pass
-
-        if atr_val and atr_prev:
-            true_range = df["high"].iloc[-1] - df["low"].iloc[-1]
-            if true_range >= atr_val * ATR_MULTIPLIER:
-                delta = atr_val - atr_prev
-                dir_arrow = "📈" if delta > 0 else "📉"
-                delta_pct = delta / atr_prev * 100
-                alerts.append(
-                    f"{dir_arrow} {name} volatility {'up' if delta>0 else 'down'} "
-                    f"(ATR {dir_arrow} {delta_pct:+.2f}%)"
-                )
+        # BBANDS trigger
+        bb = fetch_bbands(symbol)
+        if "values" in bb and bb["values"]:
+            last = bb["values"][-1]
+            upper = float(last.get("upperband", last.get("uband", 0)))
+            lower = float(last.get("lowerband", last.get("lband", 0)))
+            if curr > upper:
+                alerts.append(f"📈 {name} broke above upper BB (Close {curr:.2f} > {upper:.2f})")
+            elif curr < lower:
+                alerts.append(f"📉 {name} fell below lower BB (Close {curr:.2f} < {lower:.2f})")
 
         # Send alerts
         if alerts:
