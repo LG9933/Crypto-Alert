@@ -84,18 +84,15 @@ if manual_run:
 
         # Fetch BBANDS data
         bb = fetch_bbands(symbol)
-        bb_line = f"📈 {name} BB data unavailable"
+        bb_line = f"⚪ {name} within BB range"
         if "values" in bb and bb["values"]:
             last = bb["values"][-1]
             upper = float(last.get("upperband", last.get("uband", 0)))
             lower = float(last.get("lowerband", last.get("lband", 0)))
-            # Determine breakout
             if curr > upper:
-                bb_line = f"📈 {name} broke above upper BB (Close {curr:.2f} > {upper:.2f})"
+                bb_line = f"📈 {name} broke above upper BB (Bullish upper band)"
             elif curr < lower:
-                bb_line = f"📉 {name} fell below lower BB (Close {curr:.2f} < {lower:.2f})"
-            else:
-                bb_line = f"⚪ {name} within BB range"
+                bb_line = f"📉 {name} fell below lower BB (Bearish lower band)"
 
         lines.append(price_line)
         lines.append(bb_line)
@@ -130,9 +127,9 @@ for symbol, info in COINS.items():
             upper = float(last.get("upperband", last.get("uband", 0)))
             lower = float(last.get("lowerband", last.get("lband", 0)))
             if curr > upper:
-                alerts.append(f"📈 {name} broke above upper BB (Close {curr:.2f} > {upper:.2f})")
+                alerts.append(f"📈 {name} broke above upper BB (Bullish upper band)")
             elif curr < lower:
-                alerts.append(f"📉 {name} fell below lower BB (Close {curr:.2f} < {lower:.2f})")
+                alerts.append(f"📉 {name} fell below lower BB (Bearish lower band)")
 
         # Send alerts
         if alerts:
