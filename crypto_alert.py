@@ -3,11 +3,10 @@
 #   Crafted with ❤️ by Robin A
 # ============================================
 
-import requests
-import pandas as pd
 import os
-from datetime import datetime
 import sys
+import requests
+from datetime import datetime
 
 # ── Detect manual run via GitHub Actions ──
 manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
@@ -15,11 +14,11 @@ manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": {"name": "Bitcoin",   "threshold": 0.8},
-    "SOL/USD": {"name": "Solana",    "threshold": 1.6},
-    "LINK/USD": {"name": "Chainlink","threshold": 1.6}
+    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.5},
+    "SOL/USD": {"name": "Solana",    "threshold": 2.5},
+    "LINK/USD": {"name": "Chainlink","threshold": 2.5}
 }
-INTERVAL   = "15min"
+INTERVAL   = "30min"
 BB_PERIOD  = 20  # Bollinger Bands period
 NBDEVUP    = 2   # upper band deviation
 NBDEVDN    = 2   # lower band deviation
@@ -35,7 +34,7 @@ def send_telegram_alert(message, chat_id=None):
         "parse_mode": "Markdown"
     })
 
-# ── HELPERS ──
+# ── DATA FETCH HELPERS ──
 def fetch_time_series(symbol):
     return requests.get(
         "https://api.twelvedata.com/time_series",
@@ -46,6 +45,7 @@ def fetch_time_series(symbol):
             "apikey": API_KEY
         }
     ).json()
+
 
 def fetch_bbands(symbol):
     return requests.get(
@@ -69,30 +69,30 @@ if manual_run:
 
     for symbol, info in COINS.items():
         name = info['name']
-        # Fetch last 2 bars
+        # Fetch last 2 bars price
         ts_data = fetch_time_series(symbol)
-        if "values" not in ts_data:
+        vals = ts_data.get('values', [])
+        if len(vals) < 2:
             lines.append(f"*{name}* – ❌ no data")
             continue
-        df = pd.DataFrame(ts_data["values"]).astype({"close": float})
-        df = df.iloc[::-1].reset_index(drop=True)
-        prev_close, curr_close = df["close"].iloc[0], df["close"].iloc[1]
+        prev_close = float(vals[1]['close'])
+        curr_close = float(vals[0]['close'])
         pct = (curr_close - prev_close) / prev_close * 100
         price_arrow = "🚀" if pct > 0 else "🚨"
         verb = "rocketed" if pct > 0 else "plunged"
-        lines.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15 min!")
+        lines.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 30 min!")
 
-        # Fetch BBANDS for the same two timestamps
+        # Fetch BBANDS for same two bars
         bb = fetch_bbands(symbol)
-        if "values" in bb and bb["values"]:
-            prev_bb = bb["values"][0]
-            curr_bb = bb["values"][1]
-            prev_upper = float(prev_bb.get("upperband", prev_bb.get("uband", 0)))
-            prev_lower = float(prev_bb.get("lowerband", prev_bb.get("lband", 0)))
-            curr_upper = float(curr_bb.get("upperband", curr_bb.get("uband", 0)))
-            curr_lower = float(curr_bb.get("lowerband", curr_bb.get("lband", 0)))
-
-            # Edge-detection
+        bb_vals = bb.get('values', [])
+        if len(bb_vals) >= 2:
+            prev_bb = bb_vals[1]
+            curr_bb = bb_vals[0]
+            prev_upper = float(prev_bb.get('upperband', prev_bb.get('uband', 0)))
+            prev_lower = float(prev_bb.get('lowerband', prev_bb.get('lband', 0)))
+            curr_upper = float(curr_bb.get('upperband', curr_bb.get('uband', 0)))
+            curr_lower = float(curr_bb.get('lowerband', curr_bb.get('lband', 0)))
+            # Edge detection
             if prev_close <= prev_upper and curr_close > curr_upper:
                 lines.append(f"📈 {name} broke above upper BB (Bullish upper band)")
             elif prev_close >= prev_lower and curr_close < curr_lower:
@@ -109,32 +109,32 @@ if manual_run:
 for symbol, info in COINS.items():
     try:
         name = info['name']
-        # Fetch last 2 bars
+        # Fetch last 2 bars price
         ts_data = fetch_time_series(symbol)
-        if "values" not in ts_data:
+        vals = ts_data.get('values', [])
+        if len(vals) < 2:
             continue
-        df = pd.DataFrame(ts_data["values"]).astype({"close": float})
-        df = df.iloc[::-1].reset_index(drop=True)
-        prev_close, curr_close = df["close"].iloc[0], df["close"].iloc[1]
+        prev_close = float(vals[1]['close'])
+        curr_close = float(vals[0]['close'])
         pct = (curr_close - prev_close) / prev_close * 100
 
         alerts = []
-        # Price edge-detection
-        if abs(pct) >= info["threshold"]:
+        # Price edge detection
+        if abs(pct) >= info['threshold']:
             price_arrow = "🚀" if pct > 0 else "🚨"
             verb = "rocketed" if pct > 0 else "plunged"
-            alerts.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 15 min!")
+            alerts.append(f"{price_arrow} {name} just {verb} {pct:+.2f}% in 30 min!")
 
-        # Fetch BBANDS and edge-detection
+        # Fetch BBANDS and edge detection
         bb = fetch_bbands(symbol)
-        if "values" in bb and bb["values"]:
-            prev_bb = bb["values"][0]
-            curr_bb = bb["values"][1]
-            prev_upper = float(prev_bb.get("upperband", prev_bb.get("uband", 0)))
-            prev_lower = float(prev_bb.get("lowerband", prev_bb.get("lband", 0)))
-            curr_upper = float(curr_bb.get("upperband", curr_bb.get("uband", 0)))
-            curr_lower = float(curr_bb.get("lowerband", curr_bb.get("lband", 0)))
-
+        bb_vals = bb.get('values', [])
+        if len(bb_vals) >= 2:
+            prev_bb = bb_vals[1]
+            curr_bb = bb_vals[0]
+            prev_upper = float(prev_bb.get('upperband', prev_bb.get('uband', 0)))
+            prev_lower = float(prev_bb.get('lowerband', prev_bb.get('lband', 0)))
+            curr_upper = float(curr_bb.get('upperband', curr_bb.get('uband', 0)))
+            curr_lower = float(curr_bb.get('lowerband', curr_bb.get('lband', 0)))
             if prev_close <= prev_upper and curr_close > curr_upper:
                 alerts.append(f"📈 {name} broke above upper BB (Bullish upper band)")
             elif prev_close >= prev_lower and curr_close < curr_lower:
