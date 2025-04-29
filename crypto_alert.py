@@ -14,9 +14,9 @@ manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.5},
-    "SOL/USD": {"name": "Solana",    "threshold": 2.5},
-    "LINK/USD": {"name": "Chainlink","threshold": 2.5}
+    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.0},  # lowered from 1.5
+    "SOL/USD": {"name": "Solana",    "threshold": 2.0},  # lowered from 2.5
+    "LINK/USD": {"name": "Chainlink","threshold": 2.0}   # lowered from 2.5
 }
 INTERVAL   = "30min"
 BB_PERIOD  = 20  # Bollinger Bands period
@@ -62,7 +62,7 @@ def fetch_bbands(symbol):
         }
     ).json()
 
-# ── TEST‑RUN MODE ──
+# ── TEST-RUN MODE ──
 if manual_run:
     ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
     lines = [f"🧪 *Test Run* {ts}"]
