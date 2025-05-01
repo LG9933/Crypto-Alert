@@ -14,7 +14,10 @@ manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.0},  # lowered from 1.5
+    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.0},  # lowered threshold
+    "SOL/USD": {"name": "Solana",    "threshold": 1.5},  # lowered threshold
+    "LINK/USD": {"name": "Chainlink","threshold": 1.5}   # lowered threshold
+},  # lowered from 1.5
     "SOL/USD": {"name": "Solana",    "threshold": 2.0},  # lowered from 2.5
     "LINK/USD": {"name": "Chainlink","threshold": 2.0}   # lowered from 2.5
 }
