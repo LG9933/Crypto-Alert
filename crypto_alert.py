@@ -17,9 +17,6 @@ COINS = {
     "BTC/USD": {"name": "Bitcoin",   "threshold": 1.0},  # lowered threshold
     "SOL/USD": {"name": "Solana",    "threshold": 1.5},  # lowered threshold
     "LINK/USD": {"name": "Chainlink","threshold": 1.5}   # lowered threshold
-},  # lowered from 1.5
-    "SOL/USD": {"name": "Solana",    "threshold": 2.0},  # lowered from 2.5
-    "LINK/USD": {"name": "Chainlink","threshold": 2.0}   # lowered from 2.5
 }
 INTERVAL   = "30min"
 BB_PERIOD  = 20  # Bollinger Bands period
