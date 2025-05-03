@@ -14,9 +14,9 @@ manual_run = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
 # 🧠 CONFIG
 API_KEY = os.environ['TWELVE_API_KEY']
 COINS = {
-    "BTC/USD": {"name": "Bitcoin",   "threshold": 1.0},  # lowered threshold
-    "SOL/USD": {"name": "Solana",    "threshold": 1.5},  # lowered threshold
-    "LINK/USD": {"name": "Chainlink","threshold": 1.5}   # lowered threshold
+    "BTC/USD": {"name": "Bitcoin",   "threshold": 0.8},
+    "SOL/USD": {"name": "Solana",    "threshold": 0.8},
+    "LINK/USD": {"name": "Chainlink","threshold": 0.8}
 }
 INTERVAL   = "30min"
 BB_PERIOD  = 20  # Bollinger Bands period
